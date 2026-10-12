@@ -8,6 +8,7 @@ import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
+import android.graphics.Rect;
 import android.graphics.Shader;
 import android.graphics.pdf.PdfRenderer;
 import android.net.Uri;
@@ -115,54 +116,147 @@ public class PdfManager {
             page.render(pageBmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
             page.close();
 
-            // Create target bitmap with transparent background for edge-to-edge ambient bleed
+            // Create full-screen bitmap for authentic edge-to-edge reading
             Bitmap fullBmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888);
             Canvas fullCanvas = new Canvas(fullBmp);
 
             int left = (targetW - drawW) / 2;
             int top = (targetH - drawH) / 2;
+
+            if (drawW < targetW || drawH < targetH) {
+                // Generate blurred atmospheric background derived directly from the current page
+                int thumbW = 90;
+                int thumbH = Math.max(10, Math.round(90f * ((float) drawH / drawW)));
+                Bitmap thumb = Bitmap.createScaledBitmap(pageBmp, thumbW, thumbH, true);
+                Bitmap blurredThumb = blurAndDimThumbnail(thumb);
+                if (thumb != blurredThumb && !thumb.isRecycled()) {
+                    thumb.recycle();
+                }
+
+                if (blurredThumb != null) {
+                    Rect srcRect = new Rect(0, 0, blurredThumb.getWidth(), blurredThumb.getHeight());
+                    Rect dstRect = new Rect(0, 0, targetW, targetH);
+                    Paint bgPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+                    fullCanvas.drawBitmap(blurredThumb, srcRect, dstRect, bgPaint);
+                    blurredThumb.recycle();
+                }
+
+                // Feather pageBmp borders so they dissolve seamlessly into blurred background
+                int feather = 48;
+                Paint fadePaint = new Paint();
+                fadePaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
+                Canvas pageC = new Canvas(pageBmp);
+
+                if (top > 0) {
+                    fadePaint.setShader(new LinearGradient(
+                            0, 0, 0, feather,
+                            0xFF000000, 0x00000000, Shader.TileMode.CLAMP));
+                    pageC.drawRect(0, 0, drawW, feather, fadePaint);
+
+                    fadePaint.setShader(new LinearGradient(
+                            0, drawH - feather, 0, drawH,
+                            0x00000000, 0xFF000000, Shader.TileMode.CLAMP));
+                    pageC.drawRect(0, drawH - feather, drawW, drawH, fadePaint);
+                }
+
+                if (left > 0) {
+                    fadePaint.setShader(new LinearGradient(
+                            0, 0, feather, 0,
+                            0xFF000000, 0x00000000, Shader.TileMode.CLAMP));
+                    pageC.drawRect(0, 0, feather, drawH, fadePaint);
+
+                    fadePaint.setShader(new LinearGradient(
+                            drawW - feather, 0, drawW, 0,
+                            0x00000000, 0xFF000000, Shader.TileMode.CLAMP));
+                    pageC.drawRect(drawW - feather, 0, drawW, drawH, fadePaint);
+                }
+            }
+
             fullCanvas.drawBitmap(pageBmp, left, top, null);
             pageBmp.recycle();
-
-            // Soft feathered fade on the comic boundaries to melt into ambient glow
-            int feather = 32; // ~8mm feather gradient
-            Paint fadePaint = new Paint();
-            fadePaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
-
-            // Feather top edge if there is top margin
-            if (top > 0) {
-                fadePaint.setShader(new LinearGradient(
-                        0, top, 0, top + feather,
-                        0xFF000000, 0x00000000, Shader.TileMode.CLAMP));
-                fullCanvas.drawRect(left, top, left + drawW, top + feather, fadePaint);
-            }
-            // Feather bottom edge if there is bottom margin
-            if (top + drawH < targetH) {
-                fadePaint.setShader(new LinearGradient(
-                        0, top + drawH - feather, 0, top + drawH,
-                        0x00000000, 0xFF000000, Shader.TileMode.CLAMP));
-                fullCanvas.drawRect(left, top + drawH - feather, left + drawW, top + drawH, fadePaint);
-            }
-            // Feather left edge if there is left margin
-            if (left > 0) {
-                fadePaint.setShader(new LinearGradient(
-                        left, 0, left + feather, 0,
-                        0xFF000000, 0x00000000, Shader.TileMode.CLAMP));
-                fullCanvas.drawRect(left, top, left + feather, top + drawH, fadePaint);
-            }
-            // Feather right edge if there is right margin
-            if (left + drawW < targetW) {
-                fadePaint.setShader(new LinearGradient(
-                        left + drawW - feather, 0, left + drawW, 0,
-                        0x00000000, 0xFF000000, Shader.TileMode.CLAMP));
-                fullCanvas.drawRect(left + drawW - feather, top, left + drawW, top + drawH, fadePaint);
-            }
 
             memoryCache.put(index, fullBmp);
             return fullBmp;
         } catch (Exception e) {
             e.printStackTrace();
             return null;
+        }
+    }
+
+    private static Bitmap blurAndDimThumbnail(Bitmap src) {
+        if (src == null || src.isRecycled()) return null;
+        try {
+            int w = src.getWidth();
+            int h = src.getHeight();
+            int[] pix = new int[w * h];
+            src.getPixels(pix, 0, w, 0, 0, w, h);
+
+            float[] hsv = new float[3];
+            for (int i = 0; i < pix.length; i++) {
+                int p = pix[i];
+                Color.colorToHSV(p, hsv);
+                hsv[1] = Math.min(1.0f, hsv[1] * 1.35f);
+                hsv[2] = hsv[2] * 0.78f;
+                pix[i] = Color.HSVToColor(255, hsv);
+            }
+
+            fastBoxBlur(pix, w, h, 7);
+            fastBoxBlur(pix, w, h, 7);
+
+            Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            out.setPixels(pix, 0, w, 0, 0, w, h);
+            return out;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static void fastBoxBlur(int[] pix, int w, int h, int radius) {
+        if (w <= 0 || h <= 0 || radius <= 0) return;
+        int[] temp = new int[pix.length];
+        int div = 2 * radius + 1;
+
+        // Horizontal pass
+        for (int y = 0; y < h; y++) {
+            int yOffset = y * w;
+            int rSum = 0, gSum = 0, bSum = 0;
+
+            for (int i = -radius; i <= radius; i++) {
+                int p = pix[yOffset + Math.min(Math.max(i, 0), w - 1)];
+                rSum += (p >> 16) & 0xFF;
+                gSum += (p >> 8) & 0xFF;
+                bSum += p & 0xFF;
+            }
+
+            for (int x = 0; x < w; x++) {
+                temp[yOffset + x] = 0xFF000000 | ((rSum / div) << 16) | ((gSum / div) << 8) | (bSum / div);
+                int leftP = pix[yOffset + Math.max(0, x - radius)];
+                int rightP = pix[yOffset + Math.min(w - 1, x + radius + 1)];
+                rSum += ((rightP >> 16) & 0xFF) - ((leftP >> 16) & 0xFF);
+                gSum += ((rightP >> 8) & 0xFF) - ((leftP >> 8) & 0xFF);
+                bSum += (rightP & 0xFF) - (leftP & 0xFF);
+            }
+        }
+
+        // Vertical pass
+        for (int x = 0; x < w; x++) {
+            int rSum = 0, gSum = 0, bSum = 0;
+
+            for (int i = -radius; i <= radius; i++) {
+                int p = temp[Math.min(Math.max(i, 0), h - 1) * w + x];
+                rSum += (p >> 16) & 0xFF;
+                gSum += (p >> 8) & 0xFF;
+                bSum += p & 0xFF;
+            }
+
+            for (int y = 0; y < h; y++) {
+                pix[y * w + x] = 0xFF000000 | ((rSum / div) << 16) | ((gSum / div) << 8) | (bSum / div);
+                int topP = temp[Math.max(0, y - radius) * w + x];
+                int bottomP = temp[Math.min(h - 1, y + radius + 1) * w + x];
+                rSum += ((bottomP >> 16) & 0xFF) - ((topP >> 16) & 0xFF);
+                gSum += ((bottomP >> 8) & 0xFF) - ((topP >> 8) & 0xFF);
+                bSum += (bottomP & 0xFF) - (topP & 0xFF);
+            }
         }
     }
 

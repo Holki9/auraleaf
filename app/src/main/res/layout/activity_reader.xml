@@ -64,6 +64,8 @@
         android:layout_gravity="bottom|center_horizontal"
         android:layout_marginBottom="36dp"
         android:background="@drawable/bg_glass_pill"
+        android:elevation="30dp"
+        android:translationZ="30dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="10dp"
@@ -100,7 +102,7 @@
             android:layout_width="wrap_content"
             android:layout_height="36dp"
             android:layout_marginStart="4dp"
-            android:layout_marginEnd="4dp"
+            android:layout_marginEnd="2dp"
             android:background="@drawable/bg_glass_pill"
             android:gravity="center"
             android:paddingStart="12dp"
@@ -109,6 +111,16 @@
             android:textColor="#FFFFFF"
             android:textSize="13sp"
             android:textStyle="bold" />
+
+        <!-- Search / Page Jump Button -->
+        <ImageView
+            android:id="@+id/btn_search"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/bg_glass_circle"
+            android:padding="9dp"
+            android:src="@drawable/ic_search" />
 
         <!-- Next Page Button -->
         <ImageView

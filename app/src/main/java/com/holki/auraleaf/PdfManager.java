@@ -4,6 +4,11 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
+import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
+import android.graphics.Shader;
 import android.graphics.pdf.PdfRenderer;
 import android.net.Uri;
 import android.os.Handler;
@@ -96,24 +101,65 @@ public class PdfManager {
         try {
             PdfRenderer.Page page = renderer.openPage(index);
 
-            // Maintain exact aspect ratio
-            int w = targetW;
-            int h = (int) (w * ((float) page.getHeight() / page.getWidth()));
-            if (h > targetH) {
-                h = targetH;
-                w = (int) (h * ((float) page.getWidth() / page.getHeight()));
-            }
-            w = Math.max(10, w);
-            h = Math.max(10, h);
+            // Compute exact fitted size preserving original aspect ratio (NO vertical stretching!)
+            float pageW = page.getWidth();
+            float pageH = page.getHeight();
+            float scale = Math.min((float) targetW / pageW, (float) targetH / pageH);
+            int drawW = Math.max(10, Math.round(pageW * scale));
+            int drawH = Math.max(10, Math.round(pageH * scale));
 
-            Bitmap bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-            Canvas canvas = new Canvas(bitmap);
-            canvas.drawColor(Color.WHITE); // Solid white backdrop for paper
-            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+            // Render PDF page into high-res intermediate bitmap
+            Bitmap pageBmp = Bitmap.createBitmap(drawW, drawH, Bitmap.Config.ARGB_8888);
+            Canvas pageCanvas = new Canvas(pageBmp);
+            pageCanvas.drawColor(Color.WHITE);
+            page.render(pageBmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
             page.close();
 
-            memoryCache.put(index, bitmap);
-            return bitmap;
+            // Create target bitmap with transparent background for edge-to-edge ambient bleed
+            Bitmap fullBmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888);
+            Canvas fullCanvas = new Canvas(fullBmp);
+
+            int left = (targetW - drawW) / 2;
+            int top = (targetH - drawH) / 2;
+            fullCanvas.drawBitmap(pageBmp, left, top, null);
+            pageBmp.recycle();
+
+            // Soft feathered fade on the comic boundaries to melt into ambient glow
+            int feather = 32; // ~8mm feather gradient
+            Paint fadePaint = new Paint();
+            fadePaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
+
+            // Feather top edge if there is top margin
+            if (top > 0) {
+                fadePaint.setShader(new LinearGradient(
+                        0, top, 0, top + feather,
+                        0xFF000000, 0x00000000, Shader.TileMode.CLAMP));
+                fullCanvas.drawRect(left, top, left + drawW, top + feather, fadePaint);
+            }
+            // Feather bottom edge if there is bottom margin
+            if (top + drawH < targetH) {
+                fadePaint.setShader(new LinearGradient(
+                        0, top + drawH - feather, 0, top + drawH,
+                        0x00000000, 0xFF000000, Shader.TileMode.CLAMP));
+                fullCanvas.drawRect(left, top + drawH - feather, left + drawW, top + drawH, fadePaint);
+            }
+            // Feather left edge if there is left margin
+            if (left > 0) {
+                fadePaint.setShader(new LinearGradient(
+                        left, 0, left + feather, 0,
+                        0xFF000000, 0x00000000, Shader.TileMode.CLAMP));
+                fullCanvas.drawRect(left, top, left + feather, top + drawH, fadePaint);
+            }
+            // Feather right edge if there is right margin
+            if (left + drawW < targetW) {
+                fadePaint.setShader(new LinearGradient(
+                        left + drawW - feather, 0, left + drawW, 0,
+                        0x00000000, 0xFF000000, Shader.TileMode.CLAMP));
+                fullCanvas.drawRect(left + drawW - feather, top, left + drawW, top + drawH, fadePaint);
+            }
+
+            memoryCache.put(index, fullBmp);
+            return fullBmp;
         } catch (Exception e) {
             e.printStackTrace();
             return null;

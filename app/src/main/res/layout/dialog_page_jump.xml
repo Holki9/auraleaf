@@ -12,37 +12,64 @@
         android:layout_height="wrap_content"
         android:text="Перейти к странице"
         android:textColor="#FFFFFF"
-        android:textSize="15sp"
+        android:textSize="17sp"
         android:textStyle="bold" />
 
     <TextView
-        android:id="@+id/tv_jump_page_val"
+        android:id="@+id/tv_jump_page_hint"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="4dp"
+        android:text="Всего страниц: 1"
+        android:textColor="#94A3B8"
+        android:textSize="12sp" />
+
+    <!-- Clean numeric search input without slider -->
+    <EditText
+        android:id="@+id/et_jump_page"
+        android:layout_width="140dp"
+        android:layout_height="52dp"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/bg_glass_circle"
+        android:gravity="center"
+        android:inputType="number"
+        android:maxLength="4"
         android:text="1"
-        android:textColor="#3B82F6"
-        android:textSize="26sp"
+        android:textColor="#FFFFFF"
+        android:textColorHint="#60FFFFFF"
+        android:textSize="24sp"
         android:textStyle="bold" />
 
-    <SeekBar
-        android:id="@+id/seekbar_jump"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:min="1" />
+        android:layout_marginTop="20dp"
+        android:gravity="center"
+        android:orientation="horizontal">
 
-    <Button
-        android:id="@+id/btn_jump_confirm"
-        android:layout_width="wrap_content"
-        android:layout_height="40dp"
-        android:layout_marginTop="16dp"
-        android:background="@drawable/bg_button_glow"
-        android:paddingStart="24dp"
-        android:paddingEnd="24dp"
-        android:text="Перейти"
-        android:textColor="#FFFFFF"
-        android:textSize="13sp"
-        android:textStyle="bold" />
+        <Button
+            android:id="@+id/btn_jump_cancel"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginEnd="12dp"
+            android:background="@drawable/bg_glass_pill"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:text="Отмена"
+            android:textColor="#94A3B8"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/btn_jump_confirm"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_button_glow"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:text="Перейти"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
 
 </LinearLayout>

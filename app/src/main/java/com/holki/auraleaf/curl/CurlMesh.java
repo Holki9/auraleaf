@@ -597,10 +597,22 @@ public class CurlMesh {
 		return mTexturePage;
 	}
 
+	private boolean mVisible = true;
+
+	public void setVisible(boolean visible) {
+		mVisible = visible;
+	}
+
+	public boolean isVisible() {
+		return mVisible;
+	}
+
 	/**
 	 * Renders our page curl mesh.
 	 */
 	public synchronized void onDrawFrame(GL10 gl) {
+		if (!mVisible) return;
+
 		// First allocate texture if there is not one yet.
 		if (DRAW_TEXTURE && mTextureIds == null) {
 			// Generate texture.

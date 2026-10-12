@@ -6,6 +6,8 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.RenderEffect;
 import android.graphics.Shader;
 import android.net.Uri;
@@ -117,12 +119,14 @@ public class ReaderActivity extends AppCompatActivity {
         btnPrev = findViewById(R.id.btn_prev);
         btnNext = findViewById(R.id.btn_next);
         tvPageCounter = findViewById(R.id.tv_page_counter);
+        ImageView btnSearch = findViewById(R.id.btn_search);
         btnAmbient = findViewById(R.id.btn_ambient);
         btnSound = findViewById(R.id.btn_sound);
 
         btnShelf.setOnClickListener(v -> finish());
         btnPrev.setOnClickListener(v -> curlView.flipPrev());
         btnNext.setOnClickListener(v -> curlView.flipNext());
+        btnSearch.setOnClickListener(v -> showPageJumpDialog());
 
         btnZoomReset.setOnClickListener(v -> {
             curlView.resetZoom();
@@ -215,15 +219,21 @@ public class ReaderActivity extends AppCompatActivity {
     private Bitmap createPaperBackside(Bitmap front) {
         if (front == null || front.isRecycled()) return null;
         try {
-            Bitmap back = Bitmap.createBitmap(front.getWidth(), front.getHeight(), Bitmap.Config.RGB_565);
+            Bitmap back = Bitmap.createBitmap(front.getWidth(), front.getHeight(), Bitmap.Config.ARGB_8888);
             Canvas c = new Canvas(back);
-            c.drawColor(0xFFF7F7F7);
             Matrix m = new Matrix();
             m.preScale(-1f, 1f);
             m.postTranslate(front.getWidth(), 0f);
-            Paint p = new Paint();
-            p.setAlpha(26);
-            c.drawBitmap(front, m, p);
+
+            // Semi-opaque paper base that respects transparent margins
+            Paint paperBase = new Paint();
+            paperBase.setColorFilter(new PorterDuffColorFilter(0xFFF7F7F7, PorterDuff.Mode.SRC_IN));
+            c.drawBitmap(front, m, paperBase);
+
+            // Subtle bleed-through of mirrored content
+            Paint bleedPaint = new Paint();
+            bleedPaint.setAlpha(32);
+            c.drawBitmap(front, m, bleedPaint);
             return back;
         } catch (Exception e) {
             return null;
@@ -288,7 +298,7 @@ public class ReaderActivity extends AppCompatActivity {
         runOnUiThread(() -> {
             navGlassPill.animate().cancel();
             navGlassPill.animate()
-                    .translationY(navGlassPill.getHeight() + 120f)
+                    .translationY(140f)
                     .alpha(0f)
                     .setDuration(220)
                     .withEndAction(() -> {
@@ -305,6 +315,8 @@ public class ReaderActivity extends AppCompatActivity {
         runOnUiThread(() -> {
             navGlassPill.animate().cancel();
             navGlassPill.setVisibility(View.VISIBLE);
+            navGlassPill.setTranslationY(140f);
+            navGlassPill.setAlpha(0f);
             navGlassPill.animate()
                     .translationY(0f)
                     .alpha(1f)
@@ -332,33 +344,37 @@ public class ReaderActivity extends AppCompatActivity {
         dialog.setContentView(R.layout.dialog_page_jump);
         dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
 
-        TextView tvVal = dialog.findViewById(R.id.tv_jump_page_val);
-        SeekBar seekBar = dialog.findViewById(R.id.seekbar_jump);
+        TextView tvHint = dialog.findViewById(R.id.tv_jump_page_hint);
+        android.widget.EditText etPage = dialog.findViewById(R.id.et_jump_page);
         View btnConfirm = dialog.findViewById(R.id.btn_jump_confirm);
+        View btnCancel = dialog.findViewById(R.id.btn_jump_cancel);
 
-        tvVal.setText(String.valueOf(current));
-        seekBar.setMax(total);
-        seekBar.setProgress(current);
+        tvHint.setText("Всего страниц: " + total);
+        etPage.setText(String.valueOf(current));
+        etPage.selectAll();
 
-        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
-                int p = Math.max(1, progress);
-                tvVal.setText(String.valueOf(p));
-            }
-            @Override public void onStartTrackingTouch(SeekBar sb) {}
-            @Override public void onStopTrackingTouch(SeekBar sb) {}
-        });
+        btnCancel.setOnClickListener(v -> dialog.dismiss());
 
         btnConfirm.setOnClickListener(v -> {
-            int p = Math.max(1, seekBar.getProgress()) - 1;
-            curlView.setCurrentIndex(p);
-            updatePageUI(p);
-            dbHelper.updateProgress(bookId, p);
-            if (pdfManager != null) {
-                updateAmbientGlow(pdfManager.getPageSync(p, 400, 600));
+            String text = etPage.getText().toString().trim();
+            if (!text.isEmpty()) {
+                try {
+                    int p = Integer.parseInt(text);
+                    if (p >= 1 && p <= total) {
+                        int pageIdx = p - 1;
+                        curlView.setCurrentIndex(pageIdx);
+                        updatePageUI(pageIdx);
+                        dbHelper.updateProgress(bookId, pageIdx);
+                        if (pdfManager != null) {
+                            Bitmap bmp = pdfManager.getPageSync(pageIdx, 400, 600);
+                            updateAmbientGlow(bmp);
+                        }
+                        dialog.dismiss();
+                    } else {
+                        Toast.makeText(this, "Введите страницу от 1 до " + total, Toast.LENGTH_SHORT).show();
+                    }
+                } catch (NumberFormatException ignored) {}
             }
-            dialog.dismiss();
         });
 
         dialog.show();

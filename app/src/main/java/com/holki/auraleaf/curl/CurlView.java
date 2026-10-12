@@ -22,9 +22,11 @@ import android.graphics.PointF;
 import android.graphics.RectF;
 import android.opengl.GLSurfaceView;
 import android.util.AttributeSet;
+import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
+import android.view.ViewConfiguration;
 import com.holki.auraleaf.SoundHelper;
 
 /**
@@ -49,12 +51,11 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 	private SoundHelper mSoundHelper;
 
 	// Gesture & Tap tracking
+	private GestureDetector mGestureDetector;
 	private float mDownScreenX = 0f;
 	private float mDownScreenY = 0f;
 	private boolean mIsDragging = false;
-	private float mTouchSlop = 24f;
-	private long mLastTapTime = 0;
-	private Runnable mSingleTapRunnable = null;
+	private float mTouchSlop = 48f;
 
 	// Zoom & Pan
 	private ScaleGestureDetector mScaleDetector;
@@ -161,16 +162,55 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 		setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
 		setOnTouchListener(this);
 
+		mTouchSlop = ViewConfiguration.get(ctx).getScaledTouchSlop() * 1.5f;
+
+		mGestureDetector = new GestureDetector(ctx, new GestureDetector.SimpleOnGestureListener() {
+			@Override
+			public boolean onSingleTapConfirmed(MotionEvent e) {
+				if (!mIsDragging && mCurlState == CURL_NONE && mTapListener != null) {
+					android.util.Log.d("CurlView", "Single tap confirmed via GestureDetector");
+					mTapListener.onSingleTap();
+				}
+				return true;
+			}
+
+			@Override
+			public boolean onDoubleTap(MotionEvent e) {
+				android.util.Log.d("CurlView", "Double tap detected via GestureDetector");
+				resetZoom();
+				if (mTapListener != null) {
+					mTapListener.onDoubleTap();
+				}
+				return true;
+			}
+		});
+
 		mScaleDetector = new ScaleGestureDetector(ctx, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
 			@Override
 			public boolean onScale(ScaleGestureDetector detector) {
 				float factor = detector.getScaleFactor();
+				float prevScale = mZoomScale;
 				mZoomScale = Math.max(1.0f, Math.min(3.5f, mZoomScale * factor));
+
+				// Keep focal point stationary while scaling
+				if (prevScale != mZoomScale && getWidth() > 0 && getHeight() > 0) {
+					float ratio = (float) getWidth() / getHeight();
+					float fx = (detector.getFocusX() / getWidth() * 2f - 1f) * ratio;
+					float fy = -(detector.getFocusY() / getHeight() * 2f - 1f);
+
+					mPanX += fx * (1f / prevScale - 1f / mZoomScale);
+					mPanY += fy * (1f / prevScale - 1f / mZoomScale);
+				}
+
 				if (mZoomScale <= 1.05f) {
 					mZoomScale = 1.0f;
 					mPanX = 0f;
 					mPanY = 0f;
+				} else {
+					clampPan();
 				}
+
+				updateMeshVisibilityForZoom();
 				mRenderer.setZoom(mZoomScale, mPanX, mPanY);
 				requestRender();
 				return true;
@@ -186,6 +226,25 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 		mPageCurl = new CurlMesh(10);
 		mPageLeft.setFlipTexture(true);
 		mPageRight.setFlipTexture(false);
+	}
+
+	private void clampPan() {
+		if (getWidth() <= 0 || getHeight() <= 0) return;
+		float ratio = (float) getWidth() / getHeight();
+		float maxPanX = ratio * (1.0f - 1.0f / mZoomScale);
+		float maxPanY = 1.0f * (1.0f - 1.0f / mZoomScale);
+		mPanX = Math.max(-maxPanX, Math.min(maxPanX, mPanX));
+		mPanY = Math.max(-maxPanY, Math.min(maxPanY, mPanY));
+	}
+
+	private void updateMeshVisibilityForZoom() {
+		boolean isZoomed = mZoomScale > 1.05f;
+		if (mPageLeft != null) {
+			mPageLeft.setVisible(!isZoomed);
+		}
+		if (mPageCurl != null) {
+			mPageCurl.setVisible(!isZoomed);
+		}
 	}
 
 	@Override
@@ -296,6 +355,7 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 		mZoomScale = 1.0f;
 		mPanX = 0f;
 		mPanY = 0f;
+		updateMeshVisibilityForZoom();
 		if (mRenderer != null) {
 			mRenderer.setZoom(1.0f, 0f, 0f);
 			requestRender();
@@ -348,12 +408,27 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 			return false;
 		}
 
+		if (mGestureDetector != null) {
+			mGestureDetector.onTouchEvent(me);
+		}
+
 		if (mScaleDetector != null) {
 			mScaleDetector.onTouchEvent(me);
-			if (mScaleDetector.isInProgress()) {
-				mIsDragging = false;
-				return true;
-			}
+		}
+
+		if (mScaleDetector != null && mScaleDetector.isInProgress()) {
+			mIsDragging = false;
+			mLastPanX = me.getX();
+			mLastPanY = me.getY();
+			return true;
+		}
+
+		if (me.getPointerCount() > 1) {
+			// Multi-touch: prevent curl drag and jumping
+			mIsDragging = false;
+			mLastPanX = me.getX();
+			mLastPanY = me.getY();
+			return true;
 		}
 
 		RectF rightRect = mRenderer.getPageRect(CurlRenderer.PAGE_RIGHT);
@@ -365,10 +440,6 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 
 		switch (me.getAction() & MotionEvent.ACTION_MASK) {
 		case MotionEvent.ACTION_DOWN: {
-			if (mSingleTapRunnable != null) {
-				removeCallbacks(mSingleTapRunnable);
-				mSingleTapRunnable = null;
-			}
 			mDownScreenX = me.getX();
 			mDownScreenY = me.getY();
 			mLastPanX = me.getX();
@@ -384,8 +455,9 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 				float dy = -(me.getY() - mLastPanY) / (float) Math.max(1, getHeight()) * 2f;
 				mLastPanX = me.getX();
 				mLastPanY = me.getY();
-				mPanX += dx;
-				mPanY += dy;
+				mPanX += dx / mZoomScale;
+				mPanY += dy / mZoomScale;
+				clampPan();
 				mRenderer.setZoom(mZoomScale, mPanX, mPanY);
 				requestRender();
 				return true;
@@ -438,32 +510,6 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 		case MotionEvent.ACTION_CANCEL:
 		case MotionEvent.ACTION_UP: {
 			if (!mIsDragging) {
-				// Pure tap: detect single tap vs double tap without curling
-				long now = System.currentTimeMillis();
-				if (now - mLastTapTime < 450) {
-					// Double Tap
-					android.util.Log.d("CurlView", "Double tap detected (delta=" + (now - mLastTapTime) + "ms)");
-					mLastTapTime = 0;
-					if (mSingleTapRunnable != null) {
-						removeCallbacks(mSingleTapRunnable);
-						mSingleTapRunnable = null;
-					}
-					resetZoom();
-					if (mTapListener != null) {
-						mTapListener.onDoubleTap();
-					}
-				} else {
-					// Potential Single Tap
-					mLastTapTime = now;
-					mSingleTapRunnable = () -> {
-						android.util.Log.d("CurlView", "Single tap confirmed");
-						if (mTapListener != null) {
-							mTapListener.onSingleTap();
-						}
-						mSingleTapRunnable = null;
-					};
-					postDelayed(mSingleTapRunnable, 450);
-				}
 				mCurlState = CURL_NONE;
 				return true;
 			}

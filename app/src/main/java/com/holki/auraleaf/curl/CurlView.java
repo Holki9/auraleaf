@@ -440,8 +440,9 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 			if (!mIsDragging) {
 				// Pure tap: detect single tap vs double tap without curling
 				long now = System.currentTimeMillis();
-				if (now - mLastTapTime < 350) {
+				if (now - mLastTapTime < 450) {
 					// Double Tap
+					android.util.Log.d("CurlView", "Double tap detected (delta=" + (now - mLastTapTime) + "ms)");
 					mLastTapTime = 0;
 					if (mSingleTapRunnable != null) {
 						removeCallbacks(mSingleTapRunnable);
@@ -455,12 +456,13 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 					// Potential Single Tap
 					mLastTapTime = now;
 					mSingleTapRunnable = () -> {
+						android.util.Log.d("CurlView", "Single tap confirmed");
 						if (mTapListener != null) {
 							mTapListener.onSingleTap();
 						}
 						mSingleTapRunnable = null;
 					};
-					postDelayed(mSingleTapRunnable, 350);
+					postDelayed(mSingleTapRunnable, 450);
 				}
 				mCurlState = CURL_NONE;
 				return true;

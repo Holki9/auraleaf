@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=no, viewport-fit=cover">
+  <title>AuraLeaf</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="libs/pdf.min.js"></script>
+  <script src="libs/page-flip.browser.js"></script>
+</head>
+<body class="ambient-active">
+  <!-- Dynamic Ambient Glow Backdrop (Apple/YouTube Ambient Mode) -->
+  <div id="ambient-backdrop" class="ambient-backdrop">
+    <canvas id="ambient-canvas-a" class="ambient-layer active"></canvas>
+    <canvas id="ambient-canvas-b" class="ambient-layer"></canvas>
+    <div class="ambient-vignette"></div>
+  </div>
+
+  <!-- Main Reader Viewport -->
+  <div id="reader-view" class="view reader-view hidden">
+    <!-- Viewport that captures Zoom & Pan gestures -->
+    <div id="zoom-viewport" class="zoom-viewport">
+      <div id="zoom-content" class="zoom-content">
+        <!-- 3D Flipbook Container -->
+        <div id="book-container" class="book-container">
+          <div id="flipbook" class="flipbook"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating Zoom Pill (Appears when zoomed) -->
+    <div id="zoom-indicator" class="zoom-indicator hidden">
+      <span id="zoom-level-text">1.0x</span>
+      <button id="btn-zoom-reset" class="glass-btn-mini" title="Сбросить масштаб">
+        <svg viewBox="0 0 24 24" class="svg-icon-mini"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.85 20 14.48 20 13c0-4.42-3.58-8-8-8zm-6 8c0-1.01.25-1.97.7-2.8L5.24 8.74C4.46 10.15 4 11.52 4 13c0 4.42 3.58 8 8 8v4l5-5-5-5v4c-3.31 0-6-2.69-6-6z"/></svg>
+      </button>
+    </div>
+
+    <!-- Glassmorphic Floating Navigation Bar (Telegram Floating Island Style) -->
+    <nav id="glass-nav" class="glass-pill-nav">
+      <!-- Shelf Button -->
+      <button id="btn-shelf" class="nav-btn" aria-label="Полка книг" title="Библиотека">
+        <svg viewBox="0 0 24 24" class="svg-icon">
+          <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/>
+        </svg>
+      </button>
+
+      <div class="nav-divider"></div>
+
+      <!-- Prev Page Button -->
+      <button id="btn-prev-page" class="nav-btn" aria-label="Предыдущая страница" title="Назад">
+        <svg viewBox="0 0 24 24" class="svg-icon">
+          <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
+        </svg>
+      </button>
+
+      <!-- Page Counter / Jumper Trigger -->
+      <button id="btn-page-jumper" class="page-counter-btn" title="Перейти к странице">
+        <span id="page-num-current">1</span>
+        <span class="page-num-sep">/</span>
+        <span id="page-num-total">--</span>
+      </button>
+
+      <!-- Next Page Button -->
+      <button id="btn-next-page" class="nav-btn" aria-label="Следующая страница" title="Вперёд">
+        <svg viewBox="0 0 24 24" class="svg-icon">
+          <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>
+        </svg>
+      </button>
+
+      <div class="nav-divider"></div>
+
+      <!-- Ambient Glow Toggle Button -->
+      <button id="btn-ambient-toggle" class="nav-btn active" aria-label="Эффект свечения фона" title="Амбиентный фон">
+        <svg viewBox="0 0 24 24" class="svg-icon">
+          <path d="M12 3c-4.97 0-9 4.03-9 9 0 2.12.74 4.07 1.97 5.61L4.35 19.4c-.39.39-.39 1.02 0 1.41.39.39 1.02.39 1.41 0l1.9-1.9C9.22 19.58 10.57 20 12 20c4.97 0 9-4.03 9-9s-4.03-9-9-9zm0 15c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6z"/>
+        </svg>
+      </button>
+
+      <!-- Sound Toggle Button -->
+      <button id="btn-sound-toggle" class="nav-btn active" aria-label="Звук перелистывания" title="Звук">
+        <svg id="icon-sound-on" viewBox="0 0 24 24" class="svg-icon">
+          <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+        </svg>
+        <svg id="icon-sound-off" viewBox="0 0 24 24" class="svg-icon hidden">
+          <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27l4.06 4.06H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+        </svg>
+      </button>
+    </nav>
+
+    <!-- Quick Page Slider Drawer / Popup -->
+    <div id="page-slider-sheet" class="glass-sheet hidden">
+      <div class="sheet-header">
+        <span class="sheet-title">Перейти к странице</span>
+        <button id="btn-close-sheet" class="glass-btn-close">
+          <svg viewBox="0 0 24 24" class="svg-icon-mini"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div class="sheet-body">
+        <div class="slider-val-box">
+          <span id="slider-current-val">1</span>
+        </div>
+        <input type="range" id="page-slider" min="1" max="100" value="1" class="glass-slider">
+        <div class="sheet-actions">
+          <button id="btn-slider-go" class="glass-btn-primary">Перейти</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Library / Bookshelf View -->
+  <div id="library-view" class="view library-view">
+    <header class="library-header">
+      <div class="logo-box">
+        <div class="logo-icon-wrap">
+          <svg viewBox="0 0 32 32" class="logo-svg">
+            <path d="M6 4C4.9 4 4 4.9 4 6v20c0 1.1.9 2 2 2h20c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H6zm0 2h10v20H6V6zm12 0h8v13c-2.5 0-5 2-8 3.5V6z" fill="url(#logo-grad)"/>
+            <defs>
+              <linearGradient id="logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#60a5fa" />
+                <stop offset="50%" stop-color="#a78bfa" />
+                <stop offset="100%" stop-color="#f43f5e" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div class="logo-text-col">
+          <h1 class="logo-title">AuraLeaf</h1>
+          <span class="logo-subtitle">Комиксы & Книги с физикой страниц</span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <label for="file-input" class="btn-add-book">
+          <svg viewBox="0 0 24 24" class="svg-icon">
+            <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+          </svg>
+          <span>Открыть PDF</span>
+        </label>
+        <input type="file" id="file-input" accept="application/pdf" class="hidden-file-input">
+      </div>
+    </header>
+
+    <!-- Search Bar -->
+    <div class="search-bar-wrap">
+      <div class="search-glass-input">
+        <svg viewBox="0 0 24 24" class="svg-icon-search">
+          <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+        </svg>
+        <input type="text" id="search-input" placeholder="Поиск по названию..." autocomplete="off">
+        <button id="btn-clear-search" class="btn-clear-search hidden">
+          <svg viewBox="0 0 24 24" class="svg-icon-mini"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Shelf Content Grid -->
+    <main class="library-content">
+      <div id="books-grid" class="books-grid">
+        <!-- Rendered by JavaScript -->
+      </div>
+
+      <!-- Empty State -->
+      <div id="empty-state" class="empty-state hidden">
+        <div class="empty-icon-box">
+          <svg viewBox="0 0 64 64" class="empty-svg">
+            <path d="M12 8C9.79 8 8 9.79 8 12v40c0 2.21 1.79 4 4 4h40c2.21 0 4-1.79 4-4V12c0-2.21-1.79-4-4-4H12zm0 4h18v38H12V12zm22 0h18v26c-5 0-10 4-18 6V12z" fill="rgba(255,255,255,0.15)"/>
+          </svg>
+        </div>
+        <h2 class="empty-title">Ваша полка пуста</h2>
+        <p class="empty-desc">Добавьте любой PDF комикс или книгу. Файлы сохраняются прямо на телефоне и доступны без интернета.</p>
+        <label for="file-input" class="btn-choose-pdf">Выбрать PDF с устройства</label>
+      </div>
+    </main>
+  </div>
+
+  <!-- Rename Modal Dialog -->
+  <div id="rename-modal" class="modal-backdrop hidden">
+    <div class="glass-modal">
+      <h3 class="modal-title">Переименовать книгу</h3>
+      <input type="text" id="rename-input" class="glass-modal-input" placeholder="Новое название">
+      <div class="modal-buttons">
+        <button id="btn-cancel-rename" class="modal-btn-cancel">Отмена</button>
+        <button id="btn-confirm-rename" class="modal-btn-confirm">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div id="loading-overlay" class="loading-overlay hidden">
+    <div class="loading-glass-card">
+      <div class="loader-spinner"></div>
+      <span id="loading-status-text" class="loading-text">Загрузка книги...</span>
+      <div class="loading-bar-wrap">
+        <div id="loading-bar-fill" class="loading-bar-fill"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/db.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

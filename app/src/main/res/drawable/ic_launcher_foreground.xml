@@ -1,0 +1,26 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Curled comic page vector with glowing gradients -->
+    <path
+        android:pathData="M32,24 C28,24 24,28 24,32 L24,76 C24,80 28,84 32,84 L76,84 C80,84 84,80 84,76 L84,32 C84,28 80,24 76,24 Z"
+        android:strokeColor="#3B82F6"
+        android:strokeWidth="3"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M32,28 L54,28 L54,80 L32,80 Z"
+        android:fillColor="#1E293B" />
+    <path
+        android:pathData="M54,28 L76,28 L76,60 C70,60 62,68 54,72 Z"
+        android:fillColor="#334155" />
+    <!-- Dynamic curl corner -->
+    <path
+        android:pathData="M76,60 L54,72 C62,76 72,78 76,80 Z"
+        android:fillColor="#60A5FA" />
+    <path
+        android:pathData="M54,26 L54,82"
+        android:strokeColor="#60A5FA"
+        android:strokeWidth="2.5" />
+</vector>

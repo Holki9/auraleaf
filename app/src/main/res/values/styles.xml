@@ -1,9 +1,11 @@
 <resources>
-    <style name="Theme.AuraLeaf" parent="Theme.AppCompat.NoActionBar">
+    <style name="Theme.AuraLeaf" parent="Theme.MaterialComponents.NoActionBar">
         <item name="android:windowBackground">@color/bg_dark</item>
         <item name="android:statusBarColor">#00000000</item>
         <item name="android:navigationBarColor">#00000000</item>
         <item name="android:windowTranslucentStatus">false</item>
         <item name="android:windowTranslucentNavigation">false</item>
+        <item name="colorPrimary">@color/accent_blue</item>
+        <item name="colorSecondary">@color/accent_blue</item>
     </style>
 </resources>

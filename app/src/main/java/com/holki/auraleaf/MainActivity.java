@@ -1,47 +1,66 @@
 package com.holki.auraleaf;
 
-import android.app.Activity;
 import android.content.Intent;
+import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.pdf.PdfRenderer;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
+import android.os.ParcelFileDescriptor;
+import android.provider.OpenableColumns;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.View;
 import android.view.Window;
-import android.view.WindowManager;
-import android.webkit.ValueCallback;
-import android.webkit.WebChromeClient;
-import android.webkit.WebResourceRequest;
-import android.webkit.WebSettings;
-import android.webkit.WebView;
-import android.webkit.WebViewClient;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.Toast;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
+import androidx.recyclerview.widget.GridLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
 
-    private WebView webView;
-    private ValueCallback<Uri[]> fileUploadCallback;
-    private ActivityResultLauncher<Intent> fileChooserLauncher;
+    private DatabaseHelper dbHelper;
+    private BookAdapter adapter;
+    private RecyclerView recyclerBooks;
+    private LinearLayout layoutEmptyState;
+    private EditText etSearch;
+    private View btnOpenPdf;
+    private Button btnEmptyChoose;
+
+    private List<BookItem> allBooks = new ArrayList<>();
+    private ActivityResultLauncher<String[]> pdfPickerLauncher;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Edge-to-edge immersive experience
+        // Edge-to-edge
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         hideSystemUI();
 
         setContentView(R.layout.activity_main);
-        webView = findViewById(R.id.webview);
 
-        initFileChooserLauncher();
-        setupWebView();
+        dbHelper = new DatabaseHelper(this);
 
-        webView.loadUrl("file:///android_asset/www/index.html");
+        initViews();
+        initPicker();
     }
 
     private void hideSystemUI() {
@@ -59,113 +78,213 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void initFileChooserLauncher() {
-        fileChooserLauncher = registerForActivityResult(
-                new ActivityResultContracts.StartActivityForResult(),
-                result -> {
-                    if (fileUploadCallback == null) return;
-                    Uri[] results = null;
-                    if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
-                        Intent data = result.getData();
-                        if (data.getClipData() != null) {
-                            int count = data.getClipData().getItemCount();
-                            results = new Uri[count];
-                            for (int i = 0; i < count; i++) {
-                                results[i] = data.getClipData().getItemAt(i).getUri();
-                            }
-                        } else if (data.getData() != null) {
-                            results = new Uri[]{data.getData()};
-                        }
+    private void initViews() {
+        recyclerBooks = findViewById(R.id.recycler_books);
+        layoutEmptyState = findViewById(R.id.layout_empty_state);
+        etSearch = findViewById(R.id.et_search);
+        btnOpenPdf = findViewById(R.id.btn_open_pdf);
+        btnEmptyChoose = findViewById(R.id.btn_empty_choose);
+
+        recyclerBooks.setLayoutManager(new GridLayoutManager(this, 2));
+        adapter = new BookAdapter(this, new BookAdapter.OnBookClickListener() {
+            @Override
+            public void onBookClick(BookItem book) {
+                openReader(book);
+            }
+
+            @Override
+            public void onBookRename(BookItem book) {
+                showRenameDialog(book);
+            }
+
+            @Override
+            public void onBookDelete(BookItem book) {
+                showDeleteDialog(book);
+            }
+        });
+        recyclerBooks.setAdapter(adapter);
+
+        btnOpenPdf.setOnClickListener(v -> launchPicker());
+        btnEmptyChoose.setOnClickListener(v -> launchPicker());
+
+        etSearch.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                filterBooks(s.toString().trim());
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+    }
+
+    private void initPicker() {
+        pdfPickerLauncher = registerForActivityResult(
+                new ActivityResultContracts.OpenDocument(),
+                uri -> {
+                    if (uri != null) {
+                        try {
+                            getContentResolver().takePersistableUriPermission(
+                                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            );
+                        } catch (Exception ignored) {}
+
+                        importPdf(uri);
                     }
-                    fileUploadCallback.onReceiveValue(results);
-                    fileUploadCallback = null;
                 }
         );
     }
 
-    private void setupWebView() {
-        WebSettings settings = webView.getSettings();
-        settings.setJavaScriptEnabled(true);
-        settings.setDomStorageEnabled(true);
-        settings.setDatabaseEnabled(true);
-        settings.setAllowFileAccess(true);
-        settings.setAllowContentAccess(true);
-        settings.setMediaPlaybackRequiresUserGesture(false);
-        settings.setUseWideViewPort(true);
-        settings.setLoadWithOverviewMode(true);
-        settings.setSupportZoom(false);
-        settings.setBuiltInZoomControls(false);
-
-        webView.setBackgroundColor(0xFF0A0C10);
-        webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
-
-        webView.setWebViewClient(new WebViewClient() {
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                return false;
-            }
-        });
-
-        webView.setWebChromeClient(new WebChromeClient() {
-            @Override
-            public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback,
-                                              FileChooserParams fileChooserParams) {
-                if (fileUploadCallback != null) {
-                    fileUploadCallback.onReceiveValue(null);
-                }
-                fileUploadCallback = filePathCallback;
-
-                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("application/pdf");
-                fileChooserLauncher.launch(Intent.createChooser(intent, "Выберите PDF комикс или книгу"));
-                return true;
-            }
-        });
+    private void launchPicker() {
+        pdfPickerLauncher.launch(new String[]{"application/pdf"});
     }
 
-    @Override
-    public void onWindowFocusChanged(boolean hasFocus) {
-        super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) {
-            hideSystemUI();
-        }
-    }
+    private void importPdf(Uri uri) {
+        Toast.makeText(this, "Загрузка книги...", Toast.LENGTH_SHORT).show();
 
-    @Override
-    public void onBackPressed() {
-        if (webView != null) {
-            // Check if reader view is open in JS, if so return to library
-            webView.evaluateJavascript(
-                "(function() { if (window.auraApp && !document.getElementById('reader-view').classList.contains('hidden')) { window.auraApp.showLibrary(); return true; } return false; })()",
-                value -> {
-                    if (!"true".equals(value)) {
-                        MainActivity.super.onBackPressed();
+        Executors.newSingleThreadExecutor().execute(() -> {
+            try {
+                String displayName = getFileName(uri);
+                String title = displayName != null ? displayName.replaceFirst("[.][^.]+$", "") : "Комикс";
+
+                // Open with PdfRenderer
+                ParcelFileDescriptor pfd;
+                try {
+                    pfd = getContentResolver().openFileDescriptor(uri, "r");
+                } catch (Exception e) {
+                    File temp = new File(getCacheDir(), "import_temp.pdf");
+                    try (InputStream in = getContentResolver().openInputStream(uri);
+                         FileOutputStream out = new FileOutputStream(temp)) {
+                        byte[] buffer = new byte[8192];
+                        int r;
+                        while ((r = in.read(buffer)) != -1) out.write(buffer, 0, r);
                     }
+                    pfd = ParcelFileDescriptor.open(temp, ParcelFileDescriptor.MODE_READ_ONLY);
                 }
-            );
-        } else {
-            super.onBackPressed();
+
+                PdfRenderer renderer = new PdfRenderer(pfd);
+                int totalPages = renderer.getPageCount();
+
+                // Generate cover thumbnail from page 1
+                File coversDir = new File(getFilesDir(), "covers");
+                coversDir.mkdirs();
+                File coverFile = new File(coversDir, "cover_" + System.currentTimeMillis() + ".jpg");
+
+                if (totalPages > 0) {
+                    PdfRenderer.Page page0 = renderer.openPage(0);
+                    int tw = 320;
+                    int th = (int) (tw * ((float) page0.getHeight() / page0.getWidth()));
+                    Bitmap coverBmp = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888);
+                    Canvas canvas = new Canvas(coverBmp);
+                    canvas.drawColor(Color.WHITE);
+                    page0.render(coverBmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+                    page0.close();
+
+                    try (FileOutputStream fos = new FileOutputStream(coverFile)) {
+                        coverBmp.compress(Bitmap.CompressFormat.JPEG, 85, fos);
+                    }
+                    coverBmp.recycle();
+                }
+                renderer.close();
+                pfd.close();
+
+                long bookId = dbHelper.insertBook(title, uri.toString(), totalPages, 0, coverFile.getAbsolutePath());
+
+                runOnUiThread(() -> {
+                    loadBooks();
+                    BookItem newBook = new BookItem(bookId, title, uri.toString(), totalPages, 0, coverFile.getAbsolutePath(), System.currentTimeMillis());
+                    openReader(newBook);
+                });
+
+            } catch (Exception e) {
+                e.printStackTrace();
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Ошибка: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private String getFileName(Uri uri) {
+        String result = null;
+        if ("content".equals(uri.getScheme())) {
+            try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    int index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    if (index >= 0) result = cursor.getString(index);
+                }
+            } catch (Exception ignored) {}
         }
+        if (result == null) {
+            result = uri.getPath();
+            int cut = result != null ? result.lastIndexOf('/') : -1;
+            if (cut != -1) result = result.substring(cut + 1);
+        }
+        return result;
+    }
+
+    private void loadBooks() {
+        allBooks = dbHelper.getAllBooks();
+        filterBooks(etSearch.getText().toString().trim());
+    }
+
+    private void filterBooks(String query) {
+        if (query.isEmpty()) {
+            adapter.setBooks(allBooks);
+        } else {
+            List<BookItem> filtered = new ArrayList<>();
+            for (BookItem b : allBooks) {
+                if (b.title.toLowerCase().contains(query.toLowerCase())) {
+                    filtered.add(b);
+                }
+            }
+            adapter.setBooks(filtered);
+        }
+
+        boolean isEmpty = allBooks.isEmpty();
+        layoutEmptyState.setVisibility(isEmpty ? View.VISIBLE : View.GONE);
+        recyclerBooks.setVisibility(isEmpty ? View.GONE : View.VISIBLE);
+    }
+
+    private void openReader(BookItem book) {
+        Intent intent = new Intent(this, ReaderActivity.class);
+        intent.putExtra(ReaderActivity.EXTRA_BOOK_ID, book.id);
+        intent.putExtra(ReaderActivity.EXTRA_URI, book.uriString);
+        intent.putExtra(ReaderActivity.EXTRA_LAST_PAGE, book.lastPage);
+        startActivity(intent);
+    }
+
+    private void showRenameDialog(BookItem book) {
+        EditText input = new EditText(this);
+        input.setText(book.title);
+        input.setTextColor(Color.WHITE);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Переименовать")
+                .setView(input)
+                .setPositiveButton("Сохранить", (d, w) -> {
+                    String newTitle = input.getText().toString().trim();
+                    if (!newTitle.isEmpty()) {
+                        dbHelper.updateTitle(book.id, newTitle);
+                        loadBooks();
+                    }
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void showDeleteDialog(BookItem book) {
+        new AlertDialog.Builder(this)
+                .setTitle("Удалить книгу")
+                .setMessage("Удалить «" + book.title + "» с полки?")
+                .setPositiveButton("Удалить", (d, w) -> {
+                    dbHelper.deleteBook(book.id);
+                    loadBooks();
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        if (webView != null) webView.onResume();
-    }
-
-    @Override
-    protected void onPause() {
-        super.onPause();
-        if (webView != null) webView.onPause();
-    }
-
-    @Override
-    protected void onDestroy() {
-        if (webView != null) {
-            webView.destroy();
-        }
-        super.onDestroy();
+        hideSystemUI();
+        loadBooks();
     }
 }

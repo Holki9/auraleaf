@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/reader_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0A0C10">
+
+    <!-- Dynamic Ambient Glow Backdrop (Full screen blurred) -->
+    <ImageView
+        android:id="@+id/img_ambient"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:scaleX="1.3"
+        android:scaleY="1.3"
+        android:alpha="0.65" />
+
+    <!-- Ambient Vignette -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#660A0C10" />
+
+    <!-- 3D Page Curl Custom View -->
+    <com.holki.auraleaf.PageCurlView
+        android:id="@+id/curl_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_margin="12dp" />
+
+    <!-- Zoom Indicator (top right) -->
+    <LinearLayout
+        android:id="@+id/layout_zoom_indicator"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="32dp"
+        android:layout_marginEnd="20dp"
+        android:background="@drawable/bg_glass_pill"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="6dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tv_zoom_level"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="1.0x"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/btn_zoom_reset"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_glass_circle"
+            android:padding="3dp"
+            android:src="@drawable/ic_zoom_reset" />
+    </LinearLayout>
+
+    <!-- Telegram-Style Floating Glass Navigation Pill -->
+    <LinearLayout
+        android:id="@+id/nav_glass_pill"
+        android:layout_width="wrap_content"
+        android:layout_height="56dp"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="36dp"
+        android:background="@drawable/bg_glass_pill"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp">
+
+        <!-- Shelf Button -->
+        <ImageView
+            android:id="@+id/btn_shelf"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_glass_circle"
+            android:padding="10dp"
+            android:src="@drawable/ic_shelf" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="22dp"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:background="#26FFFFFF" />
+
+        <!-- Prev Page Button -->
+        <ImageView
+            android:id="@+id/btn_prev"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_glass_circle"
+            android:padding="10dp"
+            android:src="@drawable/ic_prev" />
+
+        <!-- Page Counter / Jumper Button -->
+        <TextView
+            android:id="@+id/tv_page_counter"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/bg_glass_pill"
+            android:gravity="center"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="1 / 1"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <!-- Next Page Button -->
+        <ImageView
+            android:id="@+id/btn_next"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_glass_circle"
+            android:padding="10dp"
+            android:src="@drawable/ic_next" />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="22dp"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:background="#26FFFFFF" />
+
+        <!-- Ambient Glow Toggle Button -->
+        <ImageView
+            android:id="@+id/btn_ambient"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_glass_circle"
+            android:padding="10dp"
+            android:src="@drawable/ic_ambient" />
+
+        <!-- Sound Toggle Button -->
+        <ImageView
+            android:id="@+id/btn_sound"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_glass_circle"
+            android:padding="10dp"
+            android:src="@drawable/ic_sound_on" />
+
+    </LinearLayout>
+
+</FrameLayout>

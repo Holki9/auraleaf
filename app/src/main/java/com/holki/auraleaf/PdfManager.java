@@ -46,7 +46,11 @@ public class PdfManager {
         };
 
         try {
-            pfd = context.getContentResolver().openFileDescriptor(uri, "r");
+            if ("file".equalsIgnoreCase(uri.getScheme()) && uri.getPath() != null) {
+                pfd = ParcelFileDescriptor.open(new File(uri.getPath()), ParcelFileDescriptor.MODE_READ_ONLY);
+            } else {
+                pfd = context.getContentResolver().openFileDescriptor(uri, "r");
+            }
         } catch (Exception e) {
             // Fallback: copy to temp file if direct SAF file descriptor fails
             File temp = new File(context.getCacheDir(), "temp_render.pdf");

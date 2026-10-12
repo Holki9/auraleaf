@@ -24,9 +24,18 @@
 
         <activity
             android:name=".ReaderActivity"
-            android:exported="false"
+            android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode"
-            android:windowSoftInputMode="adjustNothing" />
+            android:windowSoftInputMode="adjustNothing">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/pdf" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+            </intent-filter>
+        </activity>
 
     </application>
 

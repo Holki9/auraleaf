@@ -75,6 +75,9 @@ public class ReaderActivity extends AppCompatActivity {
 
         bookId = getIntent().getLongExtra(EXTRA_BOOK_ID, -1);
         uriString = getIntent().getStringExtra(EXTRA_URI);
+        if (uriString == null && getIntent().getData() != null) {
+            uriString = getIntent().getData().toString();
+        }
         startPage = getIntent().getIntExtra(EXTRA_LAST_PAGE, 0);
 
         dbHelper = new DatabaseHelper(this);

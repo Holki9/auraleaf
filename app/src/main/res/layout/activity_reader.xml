@@ -138,14 +138,6 @@
             android:layout_marginEnd="4dp"
             android:background="#26FFFFFF" />
 
-        <!-- Ambient Glow Toggle Button -->
-        <ImageView
-            android:id="@+id/btn_ambient"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:background="@drawable/bg_glass_circle"
-            android:padding="10dp"
-            android:src="@drawable/ic_ambient" />
 
         <!-- Sound Toggle Button -->
         <ImageView

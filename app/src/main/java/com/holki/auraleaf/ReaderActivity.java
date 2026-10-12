@@ -54,11 +54,13 @@ public class ReaderActivity extends AppCompatActivity {
     private ImageView btnPrev;
     private ImageView btnNext;
     private TextView tvPageCounter;
-    private ImageView btnAmbient;
     private ImageView btnSound;
 
     private boolean isAmbientEnabled = true;
     private boolean isNavVisible = true;
+    private final java.util.concurrent.ExecutorService ambientExecutor =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
+    private volatile int currentAmbientPage = -1;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -120,7 +122,6 @@ public class ReaderActivity extends AppCompatActivity {
         btnNext = findViewById(R.id.btn_next);
         tvPageCounter = findViewById(R.id.tv_page_counter);
         ImageView btnSearch = findViewById(R.id.btn_search);
-        btnAmbient = findViewById(R.id.btn_ambient);
         btnSound = findViewById(R.id.btn_sound);
 
         btnShelf.setOnClickListener(v -> finish());
@@ -133,19 +134,17 @@ public class ReaderActivity extends AppCompatActivity {
             updateZoomUI();
         });
 
-        btnAmbient.setOnClickListener(v -> toggleAmbient());
         btnSound.setOnClickListener(v -> toggleSound());
 
         tvPageCounter.setOnClickListener(v -> showPageJumpDialog());
 
         updateSoundUI();
-        updateAmbientUI();
     }
 
     private void setupAmbientEffect() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Authentic GPU hardware blur
-            imgAmbient.setRenderEffect(RenderEffect.createBlurEffect(90f, 90f, Shader.TileMode.CLAMP));
+            // Authentic GPU hardware blur on Android 12+
+            imgAmbient.setRenderEffect(RenderEffect.createBlurEffect(110f, 110f, Shader.TileMode.CLAMP));
         }
     }
 
@@ -180,10 +179,7 @@ public class ReaderActivity extends AppCompatActivity {
                 public void onPageChanged(int newPageIndex) {
                     updatePageUI(newPageIndex);
                     dbHelper.updateProgress(bookId, newPageIndex);
-                    if (pdfManager != null) {
-                        Bitmap bmp = pdfManager.getPageSync(newPageIndex, 400, 600);
-                        updateAmbientGlow(bmp);
-                    }
+                    updateAmbientGlow(newPageIndex);
                 }
             });
 
@@ -205,10 +201,7 @@ public class ReaderActivity extends AppCompatActivity {
             });
 
             updatePageUI(startPage);
-            if (pdfManager != null) {
-                Bitmap bmp = pdfManager.getPageSync(startPage, 400, 600);
-                updateAmbientGlow(bmp);
-            }
+            updateAmbientGlow(startPage);
         } catch (Exception e) {
             e.printStackTrace();
             Toast.makeText(this, "Не удалось открыть PDF: " + e.getMessage(), Toast.LENGTH_LONG).show();
@@ -247,30 +240,99 @@ public class ReaderActivity extends AppCompatActivity {
         }
     }
 
-    private void updateAmbientGlow(Bitmap bitmap) {
-        if (!isAmbientEnabled || bitmap == null || bitmap.isRecycled()) return;
+    private void updateAmbientGlow(int pageIndex) {
+        if (pdfManager == null) return;
+        currentAmbientPage = pageIndex;
+        ambientExecutor.execute(() -> {
+            if (pageIndex != currentAmbientPage || pdfManager == null) return;
+            Bitmap pageBmp = pdfManager.getPageSync(pageIndex, 400, 600);
+            if (pageBmp == null || pageIndex != currentAmbientPage) return;
 
-        runOnUiThread(() -> {
-            imgAmbient.setImageBitmap(bitmap);
-            imgAmbient.setAlpha(0f);
-            imgAmbient.animate().alpha(0.85f).setDuration(350).start();
+            Bitmap ambientBmp = createAmbientBackdrop(pageBmp);
+            if (ambientBmp == null || pageIndex != currentAmbientPage) return;
+
+            runOnUiThread(() -> {
+                if (pageIndex != currentAmbientPage) {
+                    ambientBmp.recycle();
+                    return;
+                }
+                imgAmbient.setImageBitmap(ambientBmp);
+                imgAmbient.setAlpha(0f);
+                imgAmbient.animate().alpha(0.85f).setDuration(350).start();
+            });
         });
     }
 
-    private void toggleAmbient() {
-        isAmbientEnabled = !isAmbientEnabled;
-        prefs.edit().putBoolean("ambient_enabled", isAmbientEnabled).apply();
-        updateAmbientUI();
-        if (isAmbientEnabled && pdfManager != null) {
-            updateAmbientGlow(pdfManager.getPageSync(curlView.getCurrentIndex(), 400, 600));
-        } else {
-            imgAmbient.animate().alpha(0f).setDuration(250).start();
-        }
-    }
+    private Bitmap createAmbientBackdrop(Bitmap source) {
+        if (source == null || source.isRecycled()) return null;
+        try {
+            int smallW = 100;
+            int smallH = 180;
+            Bitmap small = Bitmap.createScaledBitmap(source, smallW, smallH, true);
+            int[] pixels = new int[smallW * smallH];
+            small.getPixels(pixels, 0, smallW, 0, 0, smallW, smallH);
 
-    private void updateAmbientUI() {
-        btnAmbient.setColorFilter(isAmbientEnabled ? 0xFF3B82F6 : 0xFF94A3B8);
-        imgAmbient.setVisibility(isAmbientEnabled ? View.VISIBLE : View.GONE);
+            long sumR = 0, sumG = 0, sumB = 0;
+            int chromaticCount = 0;
+            for (int p : pixels) {
+                int a = (p >> 24) & 0xFF;
+                if (a < 50) continue;
+                int r = (p >> 16) & 0xFF;
+                int g = (p >> 8) & 0xFF;
+                int b = p & 0xFF;
+                int max = Math.max(r, Math.max(g, b));
+                int min = Math.min(r, Math.min(g, b));
+                int diff = max - min;
+                boolean isWhite = (r > 205 && g > 205 && b > 205);
+                boolean isBlack = (r < 25 && g < 25 && b < 25);
+                if (!isWhite && !isBlack && diff > 15) {
+                    sumR += r;
+                    sumG += g;
+                    sumB += b;
+                    chromaticCount++;
+                }
+            }
+
+            int avgR = chromaticCount > 0 ? (int)(sumR / chromaticCount) : 45;
+            int avgG = chromaticCount > 0 ? (int)(sumG / chromaticCount) : 40;
+            int avgB = chromaticCount > 0 ? (int)(sumB / chromaticCount) : 50;
+
+            float[] hsv = new float[3];
+            for (int i = 0; i < pixels.length; i++) {
+                int p = pixels[i];
+                int a = (p >> 24) & 0xFF;
+                if (a < 50) {
+                    pixels[i] = Color.argb(255, avgR, avgG, avgB);
+                    continue;
+                }
+                int r = (p >> 16) & 0xFF;
+                int g = (p >> 8) & 0xFF;
+                int b = p & 0xFF;
+
+                if (r > 205 && g > 205 && b > 205) {
+                    // Suppress white paper gutter and tint with page artwork colors
+                    int nr = Math.min(255, (int)(r * 0.15f + avgR * 0.85f));
+                    int ng = Math.min(255, (int)(g * 0.15f + avgG * 0.85f));
+                    int nb = Math.min(255, (int)(b * 0.15f + avgB * 0.85f));
+                    pixels[i] = Color.argb(255, nr, ng, nb);
+                } else {
+                    // Boost saturation of comic art colors for glowing backdrop
+                    Color.colorToHSV(p, hsv);
+                    hsv[1] = Math.min(1.0f, hsv[1] * 1.6f);
+                    if (hsv[2] > 0.2f) {
+                        hsv[2] = Math.min(1.0f, hsv[2] * 1.15f);
+                    }
+                    pixels[i] = Color.HSVToColor(255, hsv);
+                }
+            }
+
+            Bitmap ambient = Bitmap.createBitmap(smallW, smallH, Bitmap.Config.ARGB_8888);
+            ambient.setPixels(pixels, 0, smallW, 0, 0, smallW, smallH);
+            small.recycle();
+            return ambient;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private void toggleSound() {
@@ -365,10 +427,7 @@ public class ReaderActivity extends AppCompatActivity {
                         curlView.setCurrentIndex(pageIdx);
                         updatePageUI(pageIdx);
                         dbHelper.updateProgress(bookId, pageIdx);
-                        if (pdfManager != null) {
-                            Bitmap bmp = pdfManager.getPageSync(pageIdx, 400, 600);
-                            updateAmbientGlow(bmp);
-                        }
+                        updateAmbientGlow(pageIdx);
                         dialog.dismiss();
                     } else {
                         Toast.makeText(this, "Введите страницу от 1 до " + total, Toast.LENGTH_SHORT).show();
@@ -405,6 +464,7 @@ public class ReaderActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        if (ambientExecutor != null) ambientExecutor.shutdownNow();
         if (soundHelper != null) soundHelper.release();
         if (pdfManager != null) pdfManager.close();
         super.onDestroy();

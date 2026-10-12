@@ -198,8 +198,8 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 					float fx = (detector.getFocusX() / getWidth() * 2f - 1f) * ratio;
 					float fy = -(detector.getFocusY() / getHeight() * 2f - 1f);
 
-					mPanX += fx * (1f / prevScale - 1f / mZoomScale);
-					mPanY += fy * (1f / prevScale - 1f / mZoomScale);
+					mPanX += fx * (1f / mZoomScale - 1f / prevScale);
+					mPanY += fy * (1f / mZoomScale - 1f / prevScale);
 				}
 
 				if (mZoomScale <= 1.05f) {
@@ -416,6 +416,15 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 			mScaleDetector.onTouchEvent(me);
 		}
 
+		int action = me.getActionMasked();
+		if (action == MotionEvent.ACTION_POINTER_UP) {
+			int upIndex = me.getActionIndex();
+			int activeIndex = (upIndex == 0) ? 1 : 0;
+			mLastPanX = me.getX(activeIndex);
+			mLastPanY = me.getY(activeIndex);
+			return true;
+		}
+
 		if (mScaleDetector != null && mScaleDetector.isInProgress()) {
 			mIsDragging = false;
 			mLastPanX = me.getX();
@@ -426,8 +435,10 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 		if (me.getPointerCount() > 1) {
 			// Multi-touch: prevent curl drag and jumping
 			mIsDragging = false;
-			mLastPanX = me.getX();
-			mLastPanY = me.getY();
+			int upIndex = me.getActionIndex();
+			int activeIndex = (action == MotionEvent.ACTION_POINTER_UP && upIndex == 0) ? 1 : 0;
+			mLastPanX = me.getX(activeIndex);
+			mLastPanY = me.getY(activeIndex);
 			return true;
 		}
 
@@ -451,7 +462,8 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 
 		case MotionEvent.ACTION_MOVE: {
 			if (mZoomScale > 1.05f) {
-				float dx = (me.getX() - mLastPanX) / (float) Math.max(1, getWidth()) * 2f;
+				float ratio = (float) Math.max(1, getWidth()) / Math.max(1, getHeight());
+				float dx = (me.getX() - mLastPanX) / (float) Math.max(1, getWidth()) * 2f * ratio;
 				float dy = -(me.getY() - mLastPanY) / (float) Math.max(1, getHeight()) * 2f;
 				mLastPanX = me.getX();
 				mLastPanY = me.getY();

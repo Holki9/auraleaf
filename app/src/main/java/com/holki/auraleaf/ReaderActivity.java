@@ -139,6 +139,11 @@ public class ReaderActivity extends AppCompatActivity {
 
         tvPageCounter.setOnClickListener(v -> showPageJumpDialog());
 
+        ImageView btnBlurSettings = findViewById(R.id.btn_blur_settings);
+        if (btnBlurSettings != null) {
+            btnBlurSettings.setOnClickListener(v -> showBlurSettingsDialog());
+        }
+
         updateSoundUI();
     }
 
@@ -153,6 +158,8 @@ public class ReaderActivity extends AppCompatActivity {
         try {
             Uri uri = Uri.parse(uriString);
             pdfManager = new PdfManager(this, uri);
+            int savedBlur = prefs.getInt("blur_level", 25);
+            pdfManager.setBlurLevel(savedBlur);
 
             curlView.setPageProvider(new CurlView.PageProvider() {
                 @Override
@@ -436,6 +443,122 @@ public class ReaderActivity extends AppCompatActivity {
                 } catch (NumberFormatException ignored) {}
             }
         });
+
+        dialog.show();
+    }
+
+    private void showBlurSettingsDialog() {
+        if (pdfManager == null) return;
+
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setContentView(R.layout.dialog_blur_settings);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+        }
+
+        TextView tvStatus = dialog.findViewById(R.id.tv_blur_status);
+        TextView tvPercent = dialog.findViewById(R.id.tv_blur_percent);
+        SeekBar seekBlur = dialog.findViewById(R.id.seek_blur);
+
+        TextView chipOff = dialog.findViewById(R.id.chip_blur_off);
+        TextView chipLight = dialog.findViewById(R.id.chip_blur_light);
+        TextView chipMedium = dialog.findViewById(R.id.chip_blur_medium);
+        TextView chipStrong = dialog.findViewById(R.id.chip_blur_strong);
+        View btnClose = dialog.findViewById(R.id.btn_blur_close);
+
+        int currentLevel = pdfManager.getBlurLevel();
+        seekBlur.setProgress(currentLevel);
+
+        Runnable updateUI = () -> {
+            int val = seekBlur.getProgress();
+            tvPercent.setText(val + "%");
+            if (val == 0) {
+                tvStatus.setText("Выкл (тёмный фон)");
+                tvStatus.setTextColor(0xFF94A3B8);
+            } else if (val <= 35) {
+                tvStatus.setText("Лёгкое (картинка чёткая)");
+                tvStatus.setTextColor(0xFF38BDF8);
+            } else if (val <= 65) {
+                tvStatus.setText("Среднее (кинематографичное)");
+                tvStatus.setTextColor(0xFF38BDF8);
+            } else {
+                tvStatus.setText("Сильное (абстрактное)");
+                tvStatus.setTextColor(0xFF818CF8);
+            }
+
+            chipOff.setBackgroundResource(val == 0 ? R.drawable.bg_button_glow : R.drawable.bg_glass_pill);
+            chipOff.setTextColor(val == 0 ? 0xFFFFFFFF : 0xFF94A3B8);
+
+            chipLight.setBackgroundResource((val > 0 && val <= 35) ? R.drawable.bg_button_glow : R.drawable.bg_glass_pill);
+            chipLight.setTextColor((val > 0 && val <= 35) ? 0xFFFFFFFF : 0xFF94A3B8);
+
+            chipMedium.setBackgroundResource((val > 35 && val <= 65) ? R.drawable.bg_button_glow : R.drawable.bg_glass_pill);
+            chipMedium.setTextColor((val > 35 && val <= 65) ? 0xFFFFFFFF : 0xFF94A3B8);
+
+            chipStrong.setBackgroundResource(val > 65 ? R.drawable.bg_button_glow : R.drawable.bg_glass_pill);
+            chipStrong.setTextColor(val > 65 ? 0xFFFFFFFF : 0xFF94A3B8);
+        };
+
+        updateUI.run();
+
+        SeekBar.OnSeekBarChangeListener seekListener = new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                updateUI.run();
+                if (fromUser) {
+                    pdfManager.setBlurLevel(progress);
+                    curlView.reloadPages();
+                    prefs.edit().putInt("blur_level", progress).apply();
+                }
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                int progress = seekBar.getProgress();
+                pdfManager.setBlurLevel(progress);
+                curlView.reloadPages();
+                prefs.edit().putInt("blur_level", progress).apply();
+            }
+        };
+        seekBlur.setOnSeekBarChangeListener(seekListener);
+
+        chipOff.setOnClickListener(v -> {
+            seekBlur.setProgress(0);
+            pdfManager.setBlurLevel(0);
+            curlView.reloadPages();
+            prefs.edit().putInt("blur_level", 0).apply();
+            updateUI.run();
+        });
+
+        chipLight.setOnClickListener(v -> {
+            seekBlur.setProgress(25);
+            pdfManager.setBlurLevel(25);
+            curlView.reloadPages();
+            prefs.edit().putInt("blur_level", 25).apply();
+            updateUI.run();
+        });
+
+        chipMedium.setOnClickListener(v -> {
+            seekBlur.setProgress(50);
+            pdfManager.setBlurLevel(50);
+            curlView.reloadPages();
+            prefs.edit().putInt("blur_level", 50).apply();
+            updateUI.run();
+        });
+
+        chipStrong.setOnClickListener(v -> {
+            seekBlur.setProgress(80);
+            pdfManager.setBlurLevel(80);
+            curlView.reloadPages();
+            prefs.edit().putInt("blur_level", 80).apply();
+            updateUI.run();
+        });
+
+        btnClose.setOnClickListener(v -> dialog.dismiss());
 
         dialog.show();
     }

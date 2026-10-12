@@ -91,6 +91,25 @@ public class PdfManager {
         return pageAspectRatio;
     }
 
+    private int blurLevel = 25; // 0..100, default 25 (light blur)
+
+    public void setBlurLevel(int level) {
+        if (this.blurLevel != level) {
+            this.blurLevel = Math.max(0, Math.min(100, level));
+            clearCache();
+        }
+    }
+
+    public int getBlurLevel() {
+        return blurLevel;
+    }
+
+    public void clearCache() {
+        if (memoryCache != null) {
+            memoryCache.evictAll();
+        }
+    }
+
     public synchronized Bitmap getPageSync(int index, int targetW, int targetH) {
         if (index < 0 || index >= pageCount || renderer == null) return null;
 
@@ -124,25 +143,83 @@ public class PdfManager {
             int top = (targetH - drawH) / 2;
 
             if (drawW < targetW || drawH < targetH) {
-                // Generate blurred atmospheric background derived directly from the current page
-                int thumbW = 90;
-                int thumbH = Math.max(10, Math.round(90f * ((float) drawH / drawW)));
-                Bitmap thumb = Bitmap.createScaledBitmap(pageBmp, thumbW, thumbH, true);
-                Bitmap blurredThumb = blurAndDimThumbnail(thumb);
-                if (thumb != blurredThumb && !thumb.isRecycled()) {
-                    thumb.recycle();
+                if (blurLevel <= 0) {
+                    // Pure dark background
+                    fullCanvas.drawColor(0xFF0A0C10);
+                } else {
+                    // Center-crop page area matching target screen aspect ratio
+                    float srcAspect = (float) drawW / drawH;
+                    float targetAspect = (float) targetW / targetH;
+                    int cropX = 0, cropY = 0, cropW = drawW, cropH = drawH;
+                    if (srcAspect > targetAspect) {
+                        cropW = Math.round(drawH * targetAspect);
+                        cropX = Math.max(0, (drawW - cropW) / 2);
+                    } else {
+                        cropH = Math.round(drawW / targetAspect);
+                        cropY = Math.max(0, (drawH - cropH) / 2);
+                    }
+                    cropW = Math.min(cropW, drawW - cropX);
+                    cropH = Math.min(cropH, drawH - cropY);
+
+                    // Configure resolution and blur params based on blurLevel (1..100)
+                    int thumbW;
+                    int radius;
+                    int passes = 1;
+                    float bright;
+                    float satBoost;
+
+                    if (blurLevel <= 15) { // Ultra-light (almost pure artwork bokeh)
+                        thumbW = 420;
+                        radius = 1;
+                        bright = 0.86f;
+                        satBoost = 1.02f;
+                    } else if (blurLevel <= 35) { // Light blur (user favorite default!)
+                        thumbW = 360;
+                        radius = 2;
+                        bright = 0.84f;
+                        satBoost = 1.05f;
+                    } else if (blurLevel <= 65) { // Medium blur
+                        thumbW = 300;
+                        radius = 4;
+                        bright = 0.82f;
+                        satBoost = 1.10f;
+                    } else if (blurLevel <= 85) { // Cinematic blur
+                        thumbW = 220;
+                        radius = 7;
+                        bright = 0.80f;
+                        satBoost = 1.15f;
+                    } else { // Heavy/abstract blur
+                        thumbW = 140;
+                        radius = 9;
+                        passes = 2;
+                        bright = 0.78f;
+                        satBoost = 1.25f;
+                    }
+
+                    int thumbH = Math.max(10, Math.round((float) thumbW * targetH / targetW));
+
+                    Bitmap croppedSrc = Bitmap.createBitmap(pageBmp, cropX, cropY, cropW, cropH);
+                    Bitmap thumb = Bitmap.createScaledBitmap(croppedSrc, thumbW, thumbH, true);
+                    if (croppedSrc != thumb && !croppedSrc.isRecycled()) {
+                        croppedSrc.recycle();
+                    }
+
+                    Bitmap blurredThumb = blurAndDimThumbnail(thumb, radius, passes, bright, satBoost);
+                    if (thumb != blurredThumb && !thumb.isRecycled()) {
+                        thumb.recycle();
+                    }
+
+                    if (blurredThumb != null) {
+                        Rect srcRect = new Rect(0, 0, blurredThumb.getWidth(), blurredThumb.getHeight());
+                        Rect dstRect = new Rect(0, 0, targetW, targetH);
+                        Paint bgPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+                        fullCanvas.drawBitmap(blurredThumb, srcRect, dstRect, bgPaint);
+                        blurredThumb.recycle();
+                    }
                 }
 
-                if (blurredThumb != null) {
-                    Rect srcRect = new Rect(0, 0, blurredThumb.getWidth(), blurredThumb.getHeight());
-                    Rect dstRect = new Rect(0, 0, targetW, targetH);
-                    Paint bgPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
-                    fullCanvas.drawBitmap(blurredThumb, srcRect, dstRect, bgPaint);
-                    blurredThumb.recycle();
-                }
-
-                // Feather pageBmp borders so they dissolve seamlessly into blurred background
-                int feather = 48;
+                // Feather pageBmp borders (44px) so they dissolve seamlessly into backdrop
+                int feather = 44;
                 Paint fadePaint = new Paint();
                 fadePaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
                 Canvas pageC = new Canvas(pageBmp);
@@ -183,7 +260,7 @@ public class PdfManager {
         }
     }
 
-    private static Bitmap blurAndDimThumbnail(Bitmap src) {
+    private static Bitmap blurAndDimThumbnail(Bitmap src, int radius, int passes, float bright, float satBoost) {
         if (src == null || src.isRecycled()) return null;
         try {
             int w = src.getWidth();
@@ -195,13 +272,14 @@ public class PdfManager {
             for (int i = 0; i < pix.length; i++) {
                 int p = pix[i];
                 Color.colorToHSV(p, hsv);
-                hsv[1] = Math.min(1.0f, hsv[1] * 1.35f);
-                hsv[2] = hsv[2] * 0.78f;
+                hsv[1] = Math.min(1.0f, hsv[1] * satBoost);
+                hsv[2] = hsv[2] * bright;
                 pix[i] = Color.HSVToColor(255, hsv);
             }
 
-            fastBoxBlur(pix, w, h, 7);
-            fastBoxBlur(pix, w, h, 7);
+            for (int p = 0; p < passes; p++) {
+                fastBoxBlur(pix, w, h, radius);
+            }
 
             Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
             out.setPixels(pix, 0, w, 0, 0, w, h);

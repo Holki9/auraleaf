@@ -320,6 +320,11 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 		requestRender();
 	}
 
+	public void reloadPages() {
+		updatePages();
+		requestRender();
+	}
+
 	@Override
 	public void onSizeChanged(int w, int h, int ow, int oh) {
 		super.onSizeChanged(w, h, ow, oh);

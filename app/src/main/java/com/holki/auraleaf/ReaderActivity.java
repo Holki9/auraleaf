@@ -283,14 +283,20 @@ public class ReaderActivity extends AppCompatActivity {
     private void hideNavigation() {
         isNavVisible = false;
         navGlassPill.animate()
-                .translationY(navGlassPill.getHeight() + 100f)
+                .translationY(navGlassPill.getHeight() + 120f)
                 .alpha(0f)
                 .setDuration(220)
+                .withEndAction(() -> {
+                    if (!isNavVisible) {
+                        navGlassPill.setVisibility(View.GONE);
+                    }
+                })
                 .start();
     }
 
     private void showNavigation() {
         isNavVisible = true;
+        navGlassPill.setVisibility(View.VISIBLE);
         navGlassPill.animate()
                 .translationY(0f)
                 .alpha(1f)

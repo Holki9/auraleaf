@@ -176,6 +176,7 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 				return true;
 			}
 		});
+		mScaleDetector.setQuickScaleEnabled(false);
 
 		// Even though left and right pages are static we have to allocate room
 		// for curl on them too as we are switching meshes. Another way would be
@@ -439,13 +440,14 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 			if (!mIsDragging) {
 				// Pure tap: detect single tap vs double tap without curling
 				long now = System.currentTimeMillis();
-				if (now - mLastTapTime < 280) {
+				if (now - mLastTapTime < 350) {
 					// Double Tap
 					mLastTapTime = 0;
 					if (mSingleTapRunnable != null) {
 						removeCallbacks(mSingleTapRunnable);
 						mSingleTapRunnable = null;
 					}
+					resetZoom();
 					if (mTapListener != null) {
 						mTapListener.onDoubleTap();
 					}
@@ -458,7 +460,7 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 						}
 						mSingleTapRunnable = null;
 					};
-					postDelayed(mSingleTapRunnable, 280);
+					postDelayed(mSingleTapRunnable, 350);
 				}
 				mCurlState = CURL_NONE;
 				return true;

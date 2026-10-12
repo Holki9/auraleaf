@@ -3,6 +3,9 @@ package com.holki.auraleaf;
 import android.app.Dialog;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Matrix;
+import android.graphics.Paint;
 import android.graphics.RenderEffect;
 import android.graphics.Shader;
 import android.net.Uri;
@@ -10,6 +13,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
 import android.view.Window;
+import android.view.WindowManager;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
@@ -19,6 +23,8 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
+import com.holki.auraleaf.curl.CurlPage;
+import com.holki.auraleaf.curl.CurlView;
 
 public class ReaderActivity extends AppCompatActivity {
 
@@ -35,7 +41,7 @@ public class ReaderActivity extends AppCompatActivity {
     private DatabaseHelper dbHelper;
     private SharedPreferences prefs;
 
-    private PageCurlView curlView;
+    private CurlView curlView;
     private ImageView imgAmbient;
     private LinearLayout navGlassPill;
     private LinearLayout layoutZoomIndicator;
@@ -56,7 +62,12 @@ public class ReaderActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Edge-to-edge immersive full screen
+        // Edge-to-edge immersive full screen penetrating camera cutout
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(lp);
+        }
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         hideSystemUI();
 
@@ -136,31 +147,83 @@ public class ReaderActivity extends AppCompatActivity {
             Uri uri = Uri.parse(uriString);
             pdfManager = new PdfManager(this, uri);
 
-            curlView.setup(pdfManager, soundHelper, startPage, new PageCurlView.OnPageListener() {
+            curlView.setPageProvider(new CurlView.PageProvider() {
                 @Override
-                public void onPageChanged(int newPageIndex, Bitmap currentBitmap) {
-                    updatePageUI(newPageIndex);
-                    dbHelper.updateProgress(bookId, newPageIndex);
-                    updateAmbientGlow(currentBitmap);
+                public int getPageCount() {
+                    return pdfManager != null ? pdfManager.getPageCount() : 0;
                 }
 
                 @Override
+                public void updatePage(CurlPage page, int width, int height, int index) {
+                    if (pdfManager == null || index < 0 || index >= pdfManager.getPageCount()) return;
+                    Bitmap bmp = pdfManager.getPageSync(index, width, height);
+                    if (bmp != null) {
+                        page.setTexture(bmp, CurlPage.SIDE_FRONT);
+                        Bitmap backBmp = createPaperBackside(bmp);
+                        page.setTexture(backBmp, CurlPage.SIDE_BACK);
+                    }
+                }
+            });
+
+            curlView.setSoundHelper(soundHelper);
+            curlView.setCurrentIndex(startPage);
+
+            curlView.setOnPageListener(new CurlView.OnPageListener() {
+                @Override
+                public void onPageChanged(int newPageIndex) {
+                    updatePageUI(newPageIndex);
+                    dbHelper.updateProgress(bookId, newPageIndex);
+                    if (pdfManager != null) {
+                        Bitmap bmp = pdfManager.getPageSync(newPageIndex, 400, 600);
+                        updateAmbientGlow(bmp);
+                    }
+                }
+            });
+
+            curlView.setOnTapListener(new CurlView.OnTapListener() {
+                @Override
                 public void onSingleTap() {
-                    toggleNavigation();
+                    if (isNavVisible) {
+                        hideNavigation();
+                    }
+                    // If already hidden, single tap does nothing per strict user rule
                 }
 
                 @Override
                 public void onDoubleTap() {
                     showNavigation();
+                    curlView.resetZoom();
                     updateZoomUI();
                 }
             });
 
             updatePageUI(startPage);
+            if (pdfManager != null) {
+                Bitmap bmp = pdfManager.getPageSync(startPage, 400, 600);
+                updateAmbientGlow(bmp);
+            }
         } catch (Exception e) {
             e.printStackTrace();
             Toast.makeText(this, "Не удалось открыть PDF: " + e.getMessage(), Toast.LENGTH_LONG).show();
             finish();
+        }
+    }
+
+    private Bitmap createPaperBackside(Bitmap front) {
+        if (front == null || front.isRecycled()) return null;
+        try {
+            Bitmap back = Bitmap.createBitmap(front.getWidth(), front.getHeight(), Bitmap.Config.RGB_565);
+            Canvas c = new Canvas(back);
+            c.drawColor(0xFFF7F7F7);
+            Matrix m = new Matrix();
+            m.preScale(-1f, 1f);
+            m.postTranslate(front.getWidth(), 0f);
+            Paint p = new Paint();
+            p.setAlpha(26);
+            c.drawBitmap(front, m, p);
+            return back;
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -185,8 +248,8 @@ public class ReaderActivity extends AppCompatActivity {
         isAmbientEnabled = !isAmbientEnabled;
         prefs.edit().putBoolean("ambient_enabled", isAmbientEnabled).apply();
         updateAmbientUI();
-        if (isAmbientEnabled) {
-            updateAmbientGlow(curlView.getCurrentBitmap());
+        if (isAmbientEnabled && pdfManager != null) {
+            updateAmbientGlow(pdfManager.getPageSync(curlView.getCurrentIndex(), 400, 600));
         } else {
             imgAmbient.animate().alpha(0f).setDuration(250).start();
         }
@@ -247,7 +310,7 @@ public class ReaderActivity extends AppCompatActivity {
     private void showPageJumpDialog() {
         if (pdfManager == null) return;
         int total = pdfManager.getPageCount();
-        int current = curlView.getCurrentPageIndex() + 1;
+        int current = curlView.getCurrentIndex() + 1;
 
         Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -274,11 +337,33 @@ public class ReaderActivity extends AppCompatActivity {
 
         btnConfirm.setOnClickListener(v -> {
             int p = Math.max(1, seekBar.getProgress()) - 1;
-            curlView.flipToPage(p);
+            curlView.setCurrentIndex(p);
+            updatePageUI(p);
+            dbHelper.updateProgress(bookId, p);
+            if (pdfManager != null) {
+                updateAmbientGlow(pdfManager.getPageSync(p, 400, 600));
+            }
             dialog.dismiss();
         });
 
         dialog.show();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        hideSystemUI();
+        if (curlView != null) {
+            curlView.onResume();
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (curlView != null) {
+            curlView.onPause();
+        }
     }
 
     @Override

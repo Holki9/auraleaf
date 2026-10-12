@@ -16,7 +16,7 @@
         android:alpha="0.85" />
 
     <!-- 3D Page Curl Custom View -->
-    <com.holki.auraleaf.PageCurlView
+    <com.holki.auraleaf.curl.CurlView
         android:id="@+id/curl_view"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />

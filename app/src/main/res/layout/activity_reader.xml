@@ -5,28 +5,21 @@
     android:layout_height="match_parent"
     android:background="#0A0C10">
 
-    <!-- Dynamic Ambient Glow Backdrop (Full screen blurred) -->
+    <!-- Dynamic Ambient Glow Backdrop (Apple/YouTube Ambient Mode on GPU) -->
     <ImageView
         android:id="@+id/img_ambient"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:scaleType="centerCrop"
-        android:scaleX="1.3"
-        android:scaleY="1.3"
-        android:alpha="0.65" />
-
-    <!-- Ambient Vignette -->
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="#660A0C10" />
+        android:scaleX="1.4"
+        android:scaleY="1.4"
+        android:alpha="0.85" />
 
     <!-- 3D Page Curl Custom View -->
     <com.holki.auraleaf.PageCurlView
         android:id="@+id/curl_view"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_margin="12dp" />
+        android:layout_height="match_parent" />
 
     <!-- Zoom Indicator (top right) -->
     <LinearLayout

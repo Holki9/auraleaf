@@ -11,7 +11,6 @@ import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
-import android.graphics.PointF;
 import android.graphics.Shader;
 import android.util.AttributeSet;
 import android.view.GestureDetector;
@@ -23,7 +22,7 @@ import android.view.animation.DecelerateInterpolator;
 public class PageCurlView extends View {
 
     public interface OnPageListener {
-        void onPageChanged(int newPageIndex);
+        void onPageChanged(int newPageIndex, Bitmap currentBitmap);
         void onSingleTap();
         void onDoubleTap();
     }
@@ -40,11 +39,16 @@ public class PageCurlView extends View {
     private Bitmap nextBitmap;
     private Bitmap prevBitmap;
 
-    // Curl touch & geometry
+    // Touch & Drag state
+    private float downX = 0f;
+    private float downY = 0f;
+    private float currentTouchX = 0f;
+    private float currentTouchY = 0f;
+    private boolean isDragging = false;
     private boolean isCurling = false;
     private boolean isFlipForward = true;
-    private PointF touchPos = new PointF();
-    private PointF cornerPos = new PointF();
+    private final float touchSlop = 28f; // px
+
     private ValueAnimator curlAnimator;
 
     // Pinch-to-zoom & Pan
@@ -60,11 +64,10 @@ public class PageCurlView extends View {
     // Drawing paints & paths
     private Paint bitmapPaint;
     private Paint shadowPaint;
-    private Paint curlHighlightPaint;
-    private Paint backPagePaint;
+    private Paint highlightPaint;
+    private Paint innerShadowPaint;
     private Path clipPath;
     private Path flapPath;
-    private Matrix reflectionMatrix;
 
     public PageCurlView(Context context) {
         super(context);
@@ -79,14 +82,11 @@ public class PageCurlView extends View {
     private void init(Context context) {
         bitmapPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         shadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        curlHighlightPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-
-        backPagePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        backPagePaint.setColor(Color.WHITE);
+        highlightPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        innerShadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         clipPath = new Path();
         flapPath = new Path();
-        reflectionMatrix = new Matrix();
 
         scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
             @Override
@@ -154,6 +154,10 @@ public class PageCurlView extends View {
             prevBitmap = null;
         }
 
+        if (pageListener != null) {
+            pageListener.onPageChanged(currentPageIndex, currentBitmap);
+        }
+
         invalidate();
     }
 
@@ -194,7 +198,7 @@ public class PageCurlView extends View {
             return true;
         }
 
-        // When zoomed in, touches perform 2D panning, not page curls
+        // When zoomed in: touch is PAN only (no curl)
         if (isZoomed) {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
@@ -215,7 +219,6 @@ public class PageCurlView extends View {
             return true;
         }
 
-        // Page curl handling
         float w = getWidth();
         float h = getHeight();
 
@@ -224,43 +227,54 @@ public class PageCurlView extends View {
                 if (curlAnimator != null && curlAnimator.isRunning()) {
                     curlAnimator.cancel();
                 }
-
-                float startX = event.getX();
-                float startY = event.getY();
-
-                // Determine curl direction: right side -> forward, left side -> backward
-                isFlipForward = startX > w * 0.45f;
-
-                if (isFlipForward && currentPageIndex >= totalPages - 1) {
-                    return true; // No more forward pages
-                }
-                if (!isFlipForward && currentPageIndex <= 0) {
-                    return true; // No more previous pages
-                }
-
-                isCurling = true;
-                touchPos.set(startX, startY);
-
-                // Set origin corner
-                float cornerY = (startY > h / 2f) ? h : 0f;
-                float cornerX = isFlipForward ? w : 0f;
-                cornerPos.set(cornerX, cornerY);
-
-                invalidate();
+                downX = event.getX();
+                downY = event.getY();
+                currentTouchX = downX;
+                currentTouchY = downY;
+                isDragging = false;
+                isCurling = false;
                 return true;
 
             case MotionEvent.ACTION_MOVE:
+                float dx = event.getX() - downX;
+                float dy = event.getY() - downY;
+
+                // Check horizontal drag intent
+                if (!isDragging) {
+                    // Must be horizontal gesture (> slop and more horizontal than vertical)
+                    if (Math.abs(dx) > touchSlop && Math.abs(dx) > Math.abs(dy) * 1.25f) {
+                        isFlipForward = dx < 0; // swiping left = next page; swiping right = prev page
+
+                        if (isFlipForward && currentPageIndex >= totalPages - 1) {
+                            return true; // No next page
+                        }
+                        if (!isFlipForward && currentPageIndex <= 0) {
+                            return true; // No prev page
+                        }
+
+                        isDragging = true;
+                        isCurling = true;
+                    }
+                }
+
                 if (isCurling) {
-                    touchPos.set(event.getX(), event.getY());
+                    currentTouchX = event.getX();
+                    currentTouchY = event.getY();
                     invalidate();
                 }
                 return true;
 
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
-                if (isCurling) {
-                    finishCurlGesture();
+                if (!isDragging || !isCurling) {
+                    // IT WAS A TAP, NOT A DRAG!
+                    // Do NOT flip page on tap!
+                    isDragging = false;
+                    isCurling = false;
+                    return true;
                 }
+
+                finishCurlGesture();
                 return true;
         }
 
@@ -269,32 +283,25 @@ public class PageCurlView extends View {
 
     private void finishCurlGesture() {
         float w = getWidth();
-        float dist = Math.abs(touchPos.x - cornerPos.x);
-        boolean shouldFlip = dist > (w * 0.22f);
+        float totalDrag = isFlipForward ? (downX - currentTouchX) : (currentTouchX - downX);
+        boolean shouldFlip = totalDrag > (w * 0.20f);
 
-        float targetX;
-        float targetY = cornerPos.y;
+        float startFoldX = currentTouchX;
+        float endFoldX;
 
         if (shouldFlip) {
-            targetX = isFlipForward ? -w * 0.3f : w * 1.3f;
+            endFoldX = isFlipForward ? -w * 0.2f : w * 1.2f;
         } else {
-            targetX = cornerPos.x;
-            targetY = cornerPos.y;
+            endFoldX = isFlipForward ? w : 0f;
         }
 
-        final float startX = touchPos.x;
-        final float startY = touchPos.y;
-        final float endX = targetX;
-        final float endY = targetY;
-
         curlAnimator = ValueAnimator.ofFloat(0f, 1f);
-        curlAnimator.setDuration(280);
+        curlAnimator.setDuration(240);
         curlAnimator.setInterpolator(new DecelerateInterpolator());
 
         curlAnimator.addUpdateListener(animation -> {
             float frac = animation.getAnimatedFraction();
-            touchPos.x = startX + (endX - startX) * frac;
-            touchPos.y = startY + (endY - startY) * frac;
+            currentTouchX = startFoldX + (endFoldX - startFoldX) * frac;
             invalidate();
         });
 
@@ -302,6 +309,8 @@ public class PageCurlView extends View {
             @Override
             public void onAnimationEnd(Animator animation) {
                 isCurling = false;
+                isDragging = false;
+
                 if (shouldFlip) {
                     if (isFlipForward) {
                         currentPageIndex++;
@@ -310,7 +319,6 @@ public class PageCurlView extends View {
                     }
                     if (soundHelper != null) soundHelper.playFlip();
                     loadPageBitmaps();
-                    if (pageListener != null) pageListener.onPageChanged(currentPageIndex);
                 } else {
                     invalidate();
                 }
@@ -323,22 +331,18 @@ public class PageCurlView extends View {
     public void flipNext() {
         if (currentPageIndex < totalPages - 1 && !isCurling) {
             isFlipForward = true;
-            cornerPos.set(getWidth(), getHeight());
-            touchPos.set(getWidth(), getHeight());
             isCurling = true;
-
-            startProgrammaticFlip(true);
+            isDragging = true;
+            startAnimatedFlip(true);
         }
     }
 
     public void flipPrev() {
         if (currentPageIndex > 0 && !isCurling) {
             isFlipForward = false;
-            cornerPos.set(0, getHeight());
-            touchPos.set(0, getHeight());
             isCurling = true;
-
-            startProgrammaticFlip(false);
+            isDragging = true;
+            startAnimatedFlip(false);
         }
     }
 
@@ -347,25 +351,26 @@ public class PageCurlView extends View {
             currentPageIndex = targetPage;
             loadPageBitmaps();
             if (soundHelper != null) soundHelper.playFlip();
-            if (pageListener != null) pageListener.onPageChanged(currentPageIndex);
         }
     }
 
-    private void startProgrammaticFlip(boolean forward) {
+    private void startAnimatedFlip(boolean forward) {
         float w = getWidth();
         float h = getHeight();
 
-        curlAnimator = ValueAnimator.ofFloat(0f, 1f);
-        curlAnimator.setDuration(320);
-        curlAnimator.setInterpolator(new DecelerateInterpolator());
+        currentTouchY = h / 2f;
+        downY = h / 2f;
 
         float startX = forward ? w : 0f;
-        float endX = forward ? -w * 0.3f : w * 1.3f;
+        float endX = forward ? -w * 0.2f : w * 1.2f;
+
+        curlAnimator = ValueAnimator.ofFloat(0f, 1f);
+        curlAnimator.setDuration(280);
+        curlAnimator.setInterpolator(new DecelerateInterpolator());
 
         curlAnimator.addUpdateListener(animation -> {
             float frac = animation.getAnimatedFraction();
-            touchPos.x = startX + (endX - startX) * frac;
-            touchPos.y = h * (0.85f - 0.2f * frac);
+            currentTouchX = startX + (endX - startX) * frac;
             invalidate();
         });
 
@@ -373,10 +378,10 @@ public class PageCurlView extends View {
             @Override
             public void onAnimationEnd(Animator animation) {
                 isCurling = false;
+                isDragging = false;
                 if (forward) currentPageIndex++; else currentPageIndex--;
                 if (soundHelper != null) soundHelper.playFlip();
                 loadPageBitmaps();
-                if (pageListener != null) pageListener.onPageChanged(currentPageIndex);
             }
         });
 
@@ -393,7 +398,6 @@ public class PageCurlView extends View {
 
         canvas.save();
 
-        // Apply Zoom & Pan
         if (isZoomed) {
             canvas.translate(panX, panY);
             canvas.scale(zoomScale, zoomScale, w / 2f, h / 2f);
@@ -402,8 +406,8 @@ public class PageCurlView extends View {
         Bitmap topPage = isFlipForward ? currentBitmap : prevBitmap;
         Bitmap bottomPage = isFlipForward ? nextBitmap : currentBitmap;
 
+        // Static Page View
         if (!isCurling || topPage == null) {
-            // Static view: draw current page centered
             if (currentBitmap != null && !currentBitmap.isRecycled()) {
                 drawPageCentered(canvas, currentBitmap, w, h);
             }
@@ -411,114 +415,98 @@ public class PageCurlView extends View {
             return;
         }
 
-        // ==========================================
-        // Dynamic Page Curl Geometric Drawing
-        // ==========================================
-        float px = touchPos.x;
-        float py = touchPos.y;
-        float cx = cornerPos.x;
-        float cy = cornerPos.y;
+        // =========================================================
+        // Dynamic 3D Cylindrical Page Curl Physics
+        // =========================================================
+        float foldX = Math.max(0f, Math.min(w, currentTouchX));
 
-        // Midpoint on fold line
-        float mx = (cx + px) / 2f;
-        float my = (cy + py) / 2f;
+        // Tilt angle based slightly on vertical drag offset, clamped to prevent upside-down distortion
+        float dy = currentTouchY - downY;
+        float tiltAngleDeg = Math.max(-18f, Math.min(18f, (dy / h) * 35f));
 
-        // Normal vector to fold line
-        float dx = px - cx;
-        float dy = py - cy;
-        float len = (float) Math.hypot(dx, dy);
-        if (len < 1f) {
-            drawPageCentered(canvas, currentBitmap, w, h);
-            canvas.restore();
-            return;
-        }
-        dx /= len;
-        dy /= len;
-
-        // Tangent vector along fold line
-        float tx = -dy;
-        float ty = dx;
-
-        // 1. Draw bottom page revealed under the curl
+        // 1. Draw bottom page revealed underneath
         if (bottomPage != null && !bottomPage.isRecycled()) {
             drawPageCentered(canvas, bottomPage, w, h);
         }
 
-        // 2. Compute fold line intersections with page bounds
-        clipPath.reset();
-        clipPath.moveTo(0, 0);
-        clipPath.lineTo(w, 0);
-        clipPath.lineTo(w, h);
-        clipPath.lineTo(0, h);
-        clipPath.close();
-
-        // Compute fold line polygon
-        float reach = (float) Math.hypot(w, h) * 1.5f;
-        float p1x = mx - tx * reach;
-        float p1y = my - ty * reach;
-        float p2x = mx + tx * reach;
-        float p2y = my + ty * reach;
-
-        // 3. Draw drop shadow along the fold crease onto bottom page
+        // 2. Draw deep 3D drop shadow onto revealed bottom page along fold line
+        float shadowWidth = 65f;
         shadowPaint.setShader(new LinearGradient(
-                mx, my,
-                mx + dx * 45f, my + dy * 45f,
-                Color.argb(120, 0, 0, 0), Color.TRANSPARENT,
+                foldX, 0,
+                foldX + (isFlipForward ? shadowWidth : -shadowWidth), 0,
+                new int[]{Color.argb(160, 0, 0, 0), Color.argb(60, 0, 0, 0), Color.TRANSPARENT},
+                new float[]{0.0f, 0.4f, 1.0f},
                 Shader.TileMode.CLAMP
         ));
-        canvas.save();
-        canvas.drawCircle(mx, my, reach, shadowPaint);
-        canvas.restore();
+        canvas.drawRect(
+                isFlipForward ? foldX : foldX - shadowWidth, 0,
+                isFlipForward ? foldX + shadowWidth : foldX, h,
+                shadowPaint
+        );
 
-        // 4. Draw remaining uncurled part of top page
+        // 3. Draw remaining uncurled portion of top page
         canvas.save();
-        Path uncurledPath = new Path();
-        uncurledPath.moveTo(p1x, p1y);
-        uncurledPath.lineTo(p2x, p2y);
-        uncurledPath.lineTo(p2x - dx * reach, p2y - dy * reach);
-        uncurledPath.lineTo(p1x - dx * reach, p1y - dy * reach);
-        uncurledPath.close();
+        clipPath.reset();
+        if (isFlipForward) {
+            clipPath.moveTo(0, 0);
+            clipPath.lineTo(foldX, 0);
+            clipPath.lineTo(foldX, h);
+            clipPath.lineTo(0, h);
+        } else {
+            clipPath.moveTo(foldX, 0);
+            clipPath.lineTo(w, 0);
+            clipPath.lineTo(w, h);
+            clipPath.lineTo(foldX, h);
+        }
+        clipPath.close();
+        canvas.clipPath(clipPath);
 
-        canvas.clipPath(uncurledPath);
         drawPageCentered(canvas, topPage, w, h);
-        canvas.restore();
 
-        // 5. Draw the curled flap (reflected back of page)
-        canvas.save();
-        flapPath.reset();
-        flapPath.moveTo(p1x, p1y);
-        flapPath.lineTo(p2x, p2y);
-        flapPath.lineTo(p2x + dx * reach, p2y + dy * reach);
-        flapPath.lineTo(p1x + dx * reach, p1y + dy * reach);
-        flapPath.close();
-
-        canvas.clipPath(flapPath);
-
-        // Reflection transformation across fold line
-        reflectionMatrix.reset();
-        reflectionMatrix.postTranslate(-mx, -my);
-        float angleRad = (float) Math.atan2(dy, dx);
-        float angleDeg = (float) Math.toDegrees(angleRad);
-        reflectionMatrix.postRotate(-angleDeg);
-        reflectionMatrix.postScale(-1f, 1f);
-        reflectionMatrix.postRotate(angleDeg);
-        reflectionMatrix.postTranslate(mx, my);
-
-        canvas.concat(reflectionMatrix);
-        // Draw back of page with realistic subtle paper shading
-        drawPageCentered(canvas, topPage, w, h);
-        canvas.drawColor(Color.argb(40, 255, 255, 255)); // Paper highlight
-
-        // Curl highlight gradient along fold crease
-        curlHighlightPaint.setShader(new LinearGradient(
-                mx, my,
-                mx - dx * 35f, my - dy * 35f,
-                Color.argb(90, 255, 255, 255), Color.TRANSPARENT,
+        // 4. Inner crease shadow on top page leading into the fold
+        float creaseWidth = 45f;
+        innerShadowPaint.setShader(new LinearGradient(
+                isFlipForward ? foldX - creaseWidth : foldX + creaseWidth, 0,
+                foldX, 0,
+                new int[]{Color.TRANSPARENT, Color.argb(90, 0, 0, 0)},
+                new float[]{0f, 1.0f},
                 Shader.TileMode.CLAMP
         ));
-        canvas.drawPaint(curlHighlightPaint);
-
+        canvas.drawRect(
+                isFlipForward ? foldX - creaseWidth : foldX, 0,
+                isFlipForward ? foldX : foldX + creaseWidth, h,
+                innerShadowPaint
+        );
         canvas.restore();
+
+        // 5. Draw the curled flap (bent curl edge with specular highlight)
+        float curlFlapWidth = Math.min(100f, Math.abs(w - foldX) * 0.45f);
+        if (curlFlapWidth > 4f) {
+            canvas.save();
+            flapPath.reset();
+
+            float flapLeft = isFlipForward ? foldX : foldX - curlFlapWidth;
+            float flapRight = isFlipForward ? foldX + curlFlapWidth : foldX;
+
+            flapPath.moveTo(flapLeft, 0);
+            flapPath.lineTo(flapRight, 0);
+            flapPath.lineTo(flapRight, h);
+            flapPath.lineTo(flapLeft, h);
+            flapPath.close();
+
+            canvas.clipPath(flapPath);
+
+            // Specular paper highlight along crest of the curl
+            highlightPaint.setShader(new LinearGradient(
+                    flapLeft, 0, flapRight, 0,
+                    new int[]{Color.argb(80, 255, 255, 255), Color.argb(140, 255, 255, 255), Color.TRANSPARENT},
+                    new float[]{0.0f, 0.45f, 1.0f},
+                    Shader.TileMode.CLAMP
+            ));
+            canvas.drawRect(flapLeft, 0, flapRight, h, highlightPaint);
+
+            canvas.restore();
+        }
 
         canvas.restore();
     }

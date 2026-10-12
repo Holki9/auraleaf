@@ -126,7 +126,8 @@ public class ReaderActivity extends AppCompatActivity {
 
     private void setupAmbientEffect() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            imgAmbient.setRenderEffect(RenderEffect.createBlurEffect(70f, 70f, Shader.TileMode.CLAMP));
+            // Authentic GPU hardware blur
+            imgAmbient.setRenderEffect(RenderEffect.createBlurEffect(90f, 90f, Shader.TileMode.CLAMP));
         }
     }
 
@@ -137,10 +138,10 @@ public class ReaderActivity extends AppCompatActivity {
 
             curlView.setup(pdfManager, soundHelper, startPage, new PageCurlView.OnPageListener() {
                 @Override
-                public void onPageChanged(int newPageIndex) {
+                public void onPageChanged(int newPageIndex, Bitmap currentBitmap) {
                     updatePageUI(newPageIndex);
                     dbHelper.updateProgress(bookId, newPageIndex);
-                    updateAmbientGlow();
+                    updateAmbientGlow(currentBitmap);
                 }
 
                 @Override
@@ -156,7 +157,6 @@ public class ReaderActivity extends AppCompatActivity {
             });
 
             updatePageUI(startPage);
-            updateAmbientGlow();
         } catch (Exception e) {
             e.printStackTrace();
             Toast.makeText(this, "Не удалось открыть PDF: " + e.getMessage(), Toast.LENGTH_LONG).show();
@@ -171,13 +171,14 @@ public class ReaderActivity extends AppCompatActivity {
         }
     }
 
-    private void updateAmbientGlow() {
-        if (!isAmbientEnabled) return;
-        Bitmap current = curlView.getCurrentBitmap();
-        if (current != null && !current.isRecycled()) {
-            imgAmbient.setImageBitmap(current);
-            imgAmbient.animate().alpha(0.65f).setDuration(400).start();
-        }
+    private void updateAmbientGlow(Bitmap bitmap) {
+        if (!isAmbientEnabled || bitmap == null || bitmap.isRecycled()) return;
+
+        runOnUiThread(() -> {
+            imgAmbient.setImageBitmap(bitmap);
+            imgAmbient.setAlpha(0f);
+            imgAmbient.animate().alpha(0.85f).setDuration(350).start();
+        });
     }
 
     private void toggleAmbient() {
@@ -185,9 +186,9 @@ public class ReaderActivity extends AppCompatActivity {
         prefs.edit().putBoolean("ambient_enabled", isAmbientEnabled).apply();
         updateAmbientUI();
         if (isAmbientEnabled) {
-            updateAmbientGlow();
+            updateAmbientGlow(curlView.getCurrentBitmap());
         } else {
-            imgAmbient.animate().alpha(0f).setDuration(300).start();
+            imgAmbient.animate().alpha(0f).setDuration(250).start();
         }
     }
 
@@ -221,7 +222,7 @@ public class ReaderActivity extends AppCompatActivity {
         navGlassPill.animate()
                 .translationY(navGlassPill.getHeight() + 100f)
                 .alpha(0f)
-                .setDuration(250)
+                .setDuration(220)
                 .start();
     }
 
@@ -230,7 +231,7 @@ public class ReaderActivity extends AppCompatActivity {
         navGlassPill.animate()
                 .translationY(0f)
                 .alpha(1f)
-                .setDuration(250)
+                .setDuration(220)
                 .start();
     }
 

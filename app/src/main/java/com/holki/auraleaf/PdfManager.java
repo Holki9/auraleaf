@@ -12,7 +12,6 @@ import android.graphics.Rect;
 import android.graphics.Shader;
 import android.graphics.pdf.PdfRenderer;
 import android.net.Uri;
-import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
@@ -25,17 +24,13 @@ import java.util.concurrent.Executors;
 
 public class PdfManager {
 
-    public static final int ALIGN_CENTER = 0;
-    public static final int ALIGN_RIGHT = 1;
-    public static final int ALIGN_LEFT = 2;
-
     public interface PageCallback {
         void onPageRendered(int pageIndex, Bitmap bitmap);
     }
 
     private ComicDocument document;
     private int pageCount = 0;
-    private LruCache<Integer, Bitmap> memoryCache;
+    private LruCache<String, Bitmap> memoryCache;
     private ExecutorService renderExecutor;
     private Handler mainHandler;
     private float pageAspectRatio = 1.414f;
@@ -47,9 +42,9 @@ public class PdfManager {
         final int maxMemory = (int) (Runtime.getRuntime().maxMemory() / 1024);
         final int cacheSize = maxMemory / 8; // 1/8th of available memory
 
-        memoryCache = new LruCache<Integer, Bitmap>(cacheSize) {
+        memoryCache = new LruCache<String, Bitmap>(cacheSize) {
             @Override
-            protected int sizeOf(Integer key, Bitmap bitmap) {
+            protected int sizeOf(String key, Bitmap bitmap) {
                 return bitmap.getByteCount() / 1024;
             }
         };
@@ -120,14 +115,19 @@ public class PdfManager {
         }
     }
 
-    public synchronized Bitmap getPageSync(int index, int targetW, int targetH) {
-        return getPageSync(index, targetW, targetH, ALIGN_CENTER);
+    public synchronized Bitmap getRawThumbnail(int index, int maxW, int maxH) {
+        if (index < 0 || index >= pageCount || document == null) return null;
+        try {
+            return document.renderPage(index, maxW, maxH);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
-    public synchronized Bitmap getPageSync(int index, int targetW, int targetH, int alignMode) {
+    public synchronized Bitmap getPageSync(int index, int targetW, int targetH) {
         if (index < 0 || index >= pageCount || document == null) return null;
 
-        int cacheKey = (index * 10) + alignMode;
+        String cacheKey = index + "@" + targetW + "x" + targetH;
         Bitmap cached = memoryCache.get(cacheKey);
         if (cached != null && !cached.isRecycled()) {
             return cached;
@@ -145,14 +145,7 @@ public class PdfManager {
             Bitmap fullBmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888);
             Canvas fullCanvas = new Canvas(fullBmp);
 
-            int left;
-            if (alignMode == ALIGN_RIGHT) {
-                left = targetW - drawW; // right-aligned against center spine
-            } else if (alignMode == ALIGN_LEFT) {
-                left = 0; // left-aligned against center spine
-            } else {
-                left = (targetW - drawW) / 2; // centered
-            }
+            int left = (targetW - drawW) / 2;
             int top = (targetH - drawH) / 2;
 
             if (drawW < targetW || drawH < targetH) {
@@ -232,7 +225,6 @@ public class PdfManager {
                 }
 
                 // Feather pageBmp borders (44px) so they dissolve seamlessly into backdrop
-                // IMPORTANT: Never feather the spine border in two-page mode!
                 int feather = 44;
                 Paint fadePaint = new Paint();
                 fadePaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
@@ -250,57 +242,21 @@ public class PdfManager {
                     pageC.drawRect(0, drawH - feather, drawW, drawH, fadePaint);
                 }
 
-                // Only feather outer side, keep spine side crisp
-                if (alignMode == ALIGN_CENTER) {
-                    if (left > 0) {
-                        fadePaint.setShader(new LinearGradient(
-                                0, 0, feather, 0,
-                                0xFF000000, 0x00000000, Shader.TileMode.CLAMP));
-                        pageC.drawRect(0, 0, feather, drawH, fadePaint);
+                if (left > 0) {
+                    fadePaint.setShader(new LinearGradient(
+                            0, 0, feather, 0,
+                            0xFF000000, 0x00000000, Shader.TileMode.CLAMP));
+                    pageC.drawRect(0, 0, feather, drawH, fadePaint);
 
-                        fadePaint.setShader(new LinearGradient(
-                                drawW - feather, 0, drawW, 0,
-                                0x00000000, 0xFF000000, Shader.TileMode.CLAMP));
-                        pageC.drawRect(drawW - feather, 0, drawW, drawH, fadePaint);
-                    }
-                } else if (alignMode == ALIGN_RIGHT) {
-                    // Spine is on the right, so only feather outer left
-                    if (left > 0) {
-                        fadePaint.setShader(new LinearGradient(
-                                0, 0, feather, 0,
-                                0xFF000000, 0x00000000, Shader.TileMode.CLAMP));
-                        pageC.drawRect(0, 0, feather, drawH, fadePaint);
-                    }
-                } else if (alignMode == ALIGN_LEFT) {
-                    // Spine is on the left, so only feather outer right
-                    if (targetW > drawW) {
-                        fadePaint.setShader(new LinearGradient(
-                                drawW - feather, 0, drawW, 0,
-                                0x00000000, 0xFF000000, Shader.TileMode.CLAMP));
-                        pageC.drawRect(drawW - feather, 0, drawW, drawH, fadePaint);
-                    }
+                    fadePaint.setShader(new LinearGradient(
+                            drawW - feather, 0, drawW, 0,
+                            0x00000000, 0xFF000000, Shader.TileMode.CLAMP));
+                    pageC.drawRect(drawW - feather, 0, drawW, drawH, fadePaint);
                 }
             }
 
             fullCanvas.drawBitmap(pageBmp, left, top, null);
             pageBmp.recycle();
-
-            // Authentic book spine crease shadow in two-page spread
-            if (alignMode == ALIGN_RIGHT) {
-                GradientDrawable spineShadow = new GradientDrawable(
-                        GradientDrawable.Orientation.LEFT_RIGHT,
-                        new int[] { 0x00000000, 0x38000000 }
-                );
-                spineShadow.setBounds(targetW - 18, top, targetW, top + drawH);
-                spineShadow.draw(fullCanvas);
-            } else if (alignMode == ALIGN_LEFT) {
-                GradientDrawable spineShadow = new GradientDrawable(
-                        GradientDrawable.Orientation.LEFT_RIGHT,
-                        new int[] { 0x38000000, 0x00000000 }
-                );
-                spineShadow.setBounds(0, top, 18, top + drawH);
-                spineShadow.draw(fullCanvas);
-            }
 
             memoryCache.put(cacheKey, fullBmp);
             return fullBmp;
@@ -389,7 +345,8 @@ public class PdfManager {
     }
 
     public void getPageAsync(int index, int targetW, int targetH, PageCallback callback) {
-        Bitmap cached = memoryCache.get(index);
+        String cacheKey = index + "@" + targetW + "x" + targetH;
+        Bitmap cached = memoryCache.get(cacheKey);
         if (cached != null && !cached.isRecycled()) {
             callback.onPageRendered(index, cached);
             return;

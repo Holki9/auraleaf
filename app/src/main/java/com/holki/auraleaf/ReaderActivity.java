@@ -167,13 +167,8 @@ public class ReaderActivity extends AppCompatActivity {
 
                 @Override
                 public void updatePage(CurlPage page, int width, int height, int index) {
-                    updatePage(page, width, height, index, PdfManager.ALIGN_CENTER);
-                }
-
-                @Override
-                public void updatePage(CurlPage page, int width, int height, int index, int alignMode) {
                     if (pdfManager == null || index < 0 || index >= pdfManager.getPageCount()) return;
-                    Bitmap bmp = pdfManager.getPageSync(index, width, height, alignMode);
+                    Bitmap bmp = pdfManager.getPageSync(index, width, height);
                     if (bmp != null) {
                         page.setTexture(bmp, CurlPage.SIDE_FRONT);
                         Bitmap backBmp = createPaperBackside(bmp);
@@ -274,10 +269,11 @@ public class ReaderActivity extends AppCompatActivity {
         currentAmbientPage = pageIndex;
         ambientExecutor.execute(() -> {
             if (pageIndex != currentAmbientPage || pdfManager == null) return;
-            Bitmap pageBmp = pdfManager.getPageSync(pageIndex, 400, 600);
+            Bitmap pageBmp = pdfManager.getRawThumbnail(pageIndex, 300, 450);
             if (pageBmp == null || pageIndex != currentAmbientPage) return;
 
             Bitmap ambientBmp = createAmbientBackdrop(pageBmp);
+            pageBmp.recycle();
             if (ambientBmp == null || pageIndex != currentAmbientPage) return;
 
             runOnUiThread(() -> {

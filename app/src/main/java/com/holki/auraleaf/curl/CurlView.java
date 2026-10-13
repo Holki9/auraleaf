@@ -1008,15 +1008,11 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 	 * Updates given CurlPage via PageProvider for page located at index.
 	 */
 	private void updatePage(CurlPage page, int index) {
-		updatePage(page, index, 0);
-	}
-
-	private void updatePage(CurlPage page, int index, int alignMode) {
 		// First reset page to initial state.
 		page.reset();
 		// Ask page provider to fill it up with bitmaps and colors.
 		mPageProvider.updatePage(page, mPageBitmapWidth, mPageBitmapHeight,
-				index, alignMode);
+				index);
 	}
 
 	/**
@@ -1048,7 +1044,7 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 			}
 
 			if (leftIdx >= 0 && leftIdx < total) {
-				updatePage(mPageLeft.getTexturePage(), leftIdx, 1 /* ALIGN_RIGHT */);
+				updatePage(mPageLeft.getTexturePage(), leftIdx);
 				mPageLeft.setFlipTexture(false);
 				mPageLeft.setRect(mRenderer.getPageRect(CurlRenderer.PAGE_LEFT));
 				mPageLeft.reset();
@@ -1056,8 +1052,7 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 			}
 
 			if (rightIdx >= 0 && rightIdx < total) {
-				int align = (mCurrentIndex == 0) ? 0 /* ALIGN_CENTER */ : 2 /* ALIGN_LEFT */;
-				updatePage(mPageRight.getTexturePage(), rightIdx, align);
+				updatePage(mPageRight.getTexturePage(), rightIdx);
 				mPageRight.setFlipTexture(false);
 				mPageRight.setRect(mRenderer.getPageRect(CurlRenderer.PAGE_RIGHT));
 				mPageRight.reset();
@@ -1134,10 +1129,6 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 		 * Index is a number between 0 and getBitmapCount() - 1.
 		 */
 		public void updatePage(CurlPage page, int width, int height, int index);
-
-		default void updatePage(CurlPage page, int width, int height, int index, int alignMode) {
-			updatePage(page, width, height, index);
-		}
 	}
 
 	/**

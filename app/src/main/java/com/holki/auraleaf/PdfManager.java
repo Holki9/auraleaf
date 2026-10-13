@@ -153,17 +153,23 @@ public class PdfManager {
                     // Pure dark background
                     fullCanvas.drawColor(0xFF0A0C10);
                 } else {
-                    // Center-crop page area matching target screen aspect ratio
+                    // Center-crop page area matching target screen aspect ratio with zoom.
+                    // Zooming in (1.28x) ensures the background artwork is larger ("больше"),
+                    // expanding rich artwork to all screen edges while pushing paper margins completely outside.
+                    float bgZoom = 1.28f;
                     float srcAspect = (float) drawW / drawH;
                     float targetAspect = (float) targetW / targetH;
-                    int cropX = 0, cropY = 0, cropW = drawW, cropH = drawH;
+                    int baseCropW = drawW;
+                    int baseCropH = drawH;
                     if (srcAspect > targetAspect) {
-                        cropW = Math.round(drawH * targetAspect);
-                        cropX = Math.max(0, (drawW - cropW) / 2);
+                        baseCropW = Math.round(drawH * targetAspect);
                     } else {
-                        cropH = Math.round(drawW / targetAspect);
-                        cropY = Math.max(0, (drawH - cropH) / 2);
+                        baseCropH = Math.round(drawW / targetAspect);
                     }
+                    int cropW = Math.max(10, Math.round(baseCropW / bgZoom));
+                    int cropH = Math.max(10, Math.round(baseCropH / bgZoom));
+                    int cropX = Math.max(0, (drawW - cropW) / 2);
+                    int cropY = Math.max(0, (drawH - cropH) / 2);
                     cropW = Math.min(cropW, drawW - cropX);
                     cropH = Math.min(cropH, drawH - cropY);
 
@@ -274,13 +280,45 @@ public class PdfManager {
             int[] pix = new int[w * h];
             src.getPixels(pix, 0, w, 0, 0, w, h);
 
+            // Compute dominant chromatic artwork colors to suppress white paper gutters
+            long sumR = 0, sumG = 0, sumB = 0;
+            int chromaticCount = 0;
+            for (int p : pix) {
+                int r = (p >> 16) & 0xFF;
+                int g = (p >> 8) & 0xFF;
+                int b = p & 0xFF;
+                int max = Math.max(r, Math.max(g, b));
+                int min = Math.min(r, Math.min(g, b));
+                if (max - min > 15 && max < 240 && min > 20) {
+                    sumR += r;
+                    sumG += g;
+                    sumB += b;
+                    chromaticCount++;
+                }
+            }
+            int avgR = chromaticCount > 0 ? (int)(sumR / chromaticCount) : 40;
+            int avgG = chromaticCount > 0 ? (int)(sumG / chromaticCount) : 40;
+            int avgB = chromaticCount > 0 ? (int)(sumB / chromaticCount) : 40;
+
             float[] hsv = new float[3];
             for (int i = 0; i < pix.length; i++) {
                 int p = pix[i];
-                Color.colorToHSV(p, hsv);
-                hsv[1] = Math.min(1.0f, hsv[1] * satBoost);
-                hsv[2] = hsv[2] * bright;
-                pix[i] = Color.HSVToColor(255, hsv);
+                int r = (p >> 16) & 0xFF;
+                int g = (p >> 8) & 0xFF;
+                int b = p & 0xFF;
+
+                if (r > 205 && g > 205 && b > 205) {
+                    // Suppress white paper gutter/margins and tint with artwork atmosphere
+                    int nr = Math.min(255, (int)(r * 0.12f + avgR * 0.88f * bright));
+                    int ng = Math.min(255, (int)(g * 0.12f + avgG * 0.88f * bright));
+                    int nb = Math.min(255, (int)(b * 0.12f + avgB * 0.88f * bright));
+                    pix[i] = 0xFF000000 | (nr << 16) | (ng << 8) | nb;
+                } else {
+                    Color.colorToHSV(p, hsv);
+                    hsv[1] = Math.min(1.0f, hsv[1] * satBoost);
+                    hsv[2] = hsv[2] * bright;
+                    pix[i] = Color.HSVToColor(255, hsv);
+                }
             }
 
             for (int p = 0; p < passes; p++) {

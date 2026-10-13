@@ -167,8 +167,13 @@ public class ReaderActivity extends AppCompatActivity {
 
                 @Override
                 public void updatePage(CurlPage page, int width, int height, int index) {
+                    updatePage(page, width, height, index, PdfManager.ALIGN_CENTER);
+                }
+
+                @Override
+                public void updatePage(CurlPage page, int width, int height, int index, int alignMode) {
                     if (pdfManager == null || index < 0 || index >= pdfManager.getPageCount()) return;
-                    Bitmap bmp = pdfManager.getPageSync(index, width, height);
+                    Bitmap bmp = pdfManager.getPageSync(index, width, height, alignMode);
                     if (bmp != null) {
                         page.setTexture(bmp, CurlPage.SIDE_FRONT);
                         Bitmap backBmp = createPaperBackside(bmp);
@@ -244,7 +249,23 @@ public class ReaderActivity extends AppCompatActivity {
     private void updatePageUI(int pageIndex) {
         if (pdfManager != null) {
             int total = pdfManager.getPageCount();
-            tvPageCounter.setText((pageIndex + 1) + " / " + total);
+            if (curlView != null && curlView.getViewMode() == CurlView.SHOW_TWO_PAGES) {
+                if (pageIndex == 0) {
+                    tvPageCounter.setText("1 / " + total);
+                } else {
+                    int leftIdx = (pageIndex % 2 == 1) ? pageIndex : pageIndex - 1;
+                    int rightIdx = leftIdx + 1;
+                    int p1 = leftIdx + 1; // 1-based
+                    int p2 = Math.min(rightIdx + 1, total);
+                    if (p1 >= p2) {
+                        tvPageCounter.setText(p1 + " / " + total);
+                    } else {
+                        tvPageCounter.setText(p1 + "-" + p2 + " / " + total);
+                    }
+                }
+            } else {
+                tvPageCounter.setText((pageIndex + 1) + " / " + total);
+            }
         }
     }
 
@@ -451,6 +472,9 @@ public class ReaderActivity extends AppCompatActivity {
     public void onConfigurationChanged(android.content.res.Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         updateViewModeForOrientation(newConfig.orientation);
+        if (curlView != null) {
+            updatePageUI(curlView.getCurrentIndex());
+        }
     }
 
     private void updateViewModeForOrientation(int orientation) {

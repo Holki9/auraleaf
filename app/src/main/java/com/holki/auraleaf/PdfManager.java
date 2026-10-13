@@ -12,6 +12,7 @@ import android.graphics.Rect;
 import android.graphics.Shader;
 import android.graphics.pdf.PdfRenderer;
 import android.net.Uri;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
@@ -23,6 +24,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class PdfManager {
+
+    public static final int ALIGN_CENTER = 0;
+    public static final int ALIGN_RIGHT = 1;
+    public static final int ALIGN_LEFT = 2;
 
     public interface PageCallback {
         void onPageRendered(int pageIndex, Bitmap bitmap);
@@ -116,9 +121,14 @@ public class PdfManager {
     }
 
     public synchronized Bitmap getPageSync(int index, int targetW, int targetH) {
+        return getPageSync(index, targetW, targetH, ALIGN_CENTER);
+    }
+
+    public synchronized Bitmap getPageSync(int index, int targetW, int targetH, int alignMode) {
         if (index < 0 || index >= pageCount || document == null) return null;
 
-        Bitmap cached = memoryCache.get(index);
+        int cacheKey = (index * 10) + alignMode;
+        Bitmap cached = memoryCache.get(cacheKey);
         if (cached != null && !cached.isRecycled()) {
             return cached;
         }
@@ -135,7 +145,14 @@ public class PdfManager {
             Bitmap fullBmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888);
             Canvas fullCanvas = new Canvas(fullBmp);
 
-            int left = (targetW - drawW) / 2;
+            int left;
+            if (alignMode == ALIGN_RIGHT) {
+                left = targetW - drawW; // right-aligned against center spine
+            } else if (alignMode == ALIGN_LEFT) {
+                left = 0; // left-aligned against center spine
+            } else {
+                left = (targetW - drawW) / 2; // centered
+            }
             int top = (targetH - drawH) / 2;
 
             if (drawW < targetW || drawH < targetH) {
@@ -215,6 +232,7 @@ public class PdfManager {
                 }
 
                 // Feather pageBmp borders (44px) so they dissolve seamlessly into backdrop
+                // IMPORTANT: Never feather the spine border in two-page mode!
                 int feather = 44;
                 Paint fadePaint = new Paint();
                 fadePaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
@@ -232,23 +250,59 @@ public class PdfManager {
                     pageC.drawRect(0, drawH - feather, drawW, drawH, fadePaint);
                 }
 
-                if (left > 0) {
-                    fadePaint.setShader(new LinearGradient(
-                            0, 0, feather, 0,
-                            0xFF000000, 0x00000000, Shader.TileMode.CLAMP));
-                    pageC.drawRect(0, 0, feather, drawH, fadePaint);
+                // Only feather outer side, keep spine side crisp
+                if (alignMode == ALIGN_CENTER) {
+                    if (left > 0) {
+                        fadePaint.setShader(new LinearGradient(
+                                0, 0, feather, 0,
+                                0xFF000000, 0x00000000, Shader.TileMode.CLAMP));
+                        pageC.drawRect(0, 0, feather, drawH, fadePaint);
 
-                    fadePaint.setShader(new LinearGradient(
-                            drawW - feather, 0, drawW, 0,
-                            0x00000000, 0xFF000000, Shader.TileMode.CLAMP));
-                    pageC.drawRect(drawW - feather, 0, drawW, drawH, fadePaint);
+                        fadePaint.setShader(new LinearGradient(
+                                drawW - feather, 0, drawW, 0,
+                                0x00000000, 0xFF000000, Shader.TileMode.CLAMP));
+                        pageC.drawRect(drawW - feather, 0, drawW, drawH, fadePaint);
+                    }
+                } else if (alignMode == ALIGN_RIGHT) {
+                    // Spine is on the right, so only feather outer left
+                    if (left > 0) {
+                        fadePaint.setShader(new LinearGradient(
+                                0, 0, feather, 0,
+                                0xFF000000, 0x00000000, Shader.TileMode.CLAMP));
+                        pageC.drawRect(0, 0, feather, drawH, fadePaint);
+                    }
+                } else if (alignMode == ALIGN_LEFT) {
+                    // Spine is on the left, so only feather outer right
+                    if (targetW > drawW) {
+                        fadePaint.setShader(new LinearGradient(
+                                drawW - feather, 0, drawW, 0,
+                                0x00000000, 0xFF000000, Shader.TileMode.CLAMP));
+                        pageC.drawRect(drawW - feather, 0, drawW, drawH, fadePaint);
+                    }
                 }
             }
 
             fullCanvas.drawBitmap(pageBmp, left, top, null);
             pageBmp.recycle();
 
-            memoryCache.put(index, fullBmp);
+            // Authentic book spine crease shadow in two-page spread
+            if (alignMode == ALIGN_RIGHT) {
+                GradientDrawable spineShadow = new GradientDrawable(
+                        GradientDrawable.Orientation.LEFT_RIGHT,
+                        new int[] { 0x00000000, 0x38000000 }
+                );
+                spineShadow.setBounds(targetW - 18, top, targetW, top + drawH);
+                spineShadow.draw(fullCanvas);
+            } else if (alignMode == ALIGN_LEFT) {
+                GradientDrawable spineShadow = new GradientDrawable(
+                        GradientDrawable.Orientation.LEFT_RIGHT,
+                        new int[] { 0x38000000, 0x00000000 }
+                );
+                spineShadow.setBounds(0, top, 18, top + drawH);
+                spineShadow.draw(fullCanvas);
+            }
+
+            memoryCache.put(cacheKey, fullBmp);
             return fullBmp;
         } catch (Exception e) {
             e.printStackTrace();

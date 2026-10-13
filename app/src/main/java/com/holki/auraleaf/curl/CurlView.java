@@ -49,6 +49,7 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 	private OnPageListener mPageListener;
 	private OnTapListener mTapListener;
 	private SoundHelper mSoundHelper;
+	private com.holki.auraleaf.HapticHelper mHapticHelper;
 
 	// Gesture & Tap tracking
 	private GestureDetector mGestureDetector;
@@ -114,7 +115,7 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 	private PointerPosition mPointerPos = new PointerPosition();
 
 	private CurlRenderer mRenderer;
-	private boolean mRenderLeftPage = true;
+	private boolean mRenderLeftPage = false;
 	private SizeChangedObserver mSizeChangedObserver;
 
 	// One page is the default.
@@ -296,6 +297,9 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 				if (mSoundHelper != null) {
 					mSoundHelper.playFlip();
 				}
+				if (mHapticHelper != null) {
+					mHapticHelper.vibratePageFlip();
+				}
 				if (mPageListener != null) {
 					final int newIdx = mCurrentIndex;
 					post(() -> mPageListener.onPageChanged(newIdx));
@@ -346,6 +350,10 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 
 	public void setSoundHelper(SoundHelper helper) {
 		mSoundHelper = helper;
+	}
+
+	public void setHapticHelper(com.holki.auraleaf.HapticHelper helper) {
+		mHapticHelper = helper;
 	}
 
 	public void setOnPageListener(OnPageListener listener) {
@@ -739,14 +747,19 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 		switch (viewMode) {
 		case SHOW_ONE_PAGE:
 			mViewMode = viewMode;
+			mRenderLeftPage = false;
 			mPageLeft.setFlipTexture(true);
 			mRenderer.setViewMode(CurlRenderer.SHOW_ONE_PAGE);
 			break;
 		case SHOW_TWO_PAGES:
 			mViewMode = viewMode;
+			mRenderLeftPage = true;
 			mPageLeft.setFlipTexture(false);
 			mRenderer.setViewMode(CurlRenderer.SHOW_TWO_PAGES);
 			break;
+		}
+		if (mPageBitmapWidth > 0 && mPageBitmapHeight > 0) {
+			reloadPages();
 		}
 	}
 
@@ -755,6 +768,9 @@ public class CurlView extends GLSurfaceView implements View.OnTouchListener,
 	 * pages in landscape
 	 */
 	private void startCurl(int page) {
+		if (mHapticHelper != null) {
+			mHapticHelper.vibratePageTouch();
+		}
 		switch (page) {
 
 		// Once right side page is curled, first right page is assigned into

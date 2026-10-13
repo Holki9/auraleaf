@@ -28,8 +28,7 @@ public class PdfManager {
         void onPageRendered(int pageIndex, Bitmap bitmap);
     }
 
-    private ParcelFileDescriptor pfd;
-    private PdfRenderer renderer;
+    private ComicDocument document;
     private int pageCount = 0;
     private LruCache<Integer, Bitmap> memoryCache;
     private ExecutorService renderExecutor;
@@ -40,7 +39,6 @@ public class PdfManager {
         mainHandler = new Handler(Looper.getMainLooper());
         renderExecutor = Executors.newFixedThreadPool(2);
 
-        // Max 5 high-res bitmaps in cache to prevent OOM
         final int maxMemory = (int) (Runtime.getRuntime().maxMemory() / 1024);
         final int cacheSize = maxMemory / 8; // 1/8th of available memory
 
@@ -51,35 +49,42 @@ public class PdfManager {
             }
         };
 
-        try {
-            if ("file".equalsIgnoreCase(uri.getScheme()) && uri.getPath() != null) {
-                pfd = ParcelFileDescriptor.open(new File(uri.getPath()), ParcelFileDescriptor.MODE_READ_ONLY);
-            } else {
-                pfd = context.getContentResolver().openFileDescriptor(uri, "r");
-            }
-        } catch (Exception e) {
-            // Fallback: copy to temp file if direct SAF file descriptor fails
-            File temp = new File(context.getCacheDir(), "temp_render.pdf");
-            try (InputStream in = context.getContentResolver().openInputStream(uri);
-                 FileOutputStream out = new FileOutputStream(temp)) {
-                byte[] buffer = new byte[8192];
-                int read;
-                while ((read = in.read(buffer)) != -1) {
-                    out.write(buffer, 0, read);
+        String uriStr = uri.toString().toLowerCase();
+        String pathStr = uri.getPath() != null ? uri.getPath().toLowerCase() : "";
+
+        if (uriStr.endsWith(".cbz") || uriStr.endsWith(".zip") || pathStr.endsWith(".cbz") || pathStr.endsWith(".zip")) {
+            File cbzFile = CoverExtractor.getFileFromUri(context, uri, "active.cbz");
+            document = new CbzDocument(cbzFile);
+        } else if (uriStr.endsWith(".cbr") || uriStr.endsWith(".rar") || pathStr.endsWith(".cbr") || pathStr.endsWith(".rar")) {
+            File cbrFile = CoverExtractor.getFileFromUri(context, uri, "active.cbr");
+            document = new CbrDocument(cbrFile);
+        } else {
+            // PDF document
+            ParcelFileDescriptor pfd;
+            try {
+                if ("file".equalsIgnoreCase(uri.getScheme()) && uri.getPath() != null) {
+                    pfd = ParcelFileDescriptor.open(new File(uri.getPath()), ParcelFileDescriptor.MODE_READ_ONLY);
+                } else {
+                    pfd = context.getContentResolver().openFileDescriptor(uri, "r");
                 }
+            } catch (Exception e) {
+                File temp = new File(context.getCacheDir(), "temp_render.pdf");
+                try (InputStream in = context.getContentResolver().openInputStream(uri);
+                     FileOutputStream out = new FileOutputStream(temp)) {
+                    byte[] buffer = new byte[8192];
+                    int read;
+                    while ((read = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, read);
+                    }
+                }
+                pfd = ParcelFileDescriptor.open(temp, ParcelFileDescriptor.MODE_READ_ONLY);
             }
-            pfd = ParcelFileDescriptor.open(temp, ParcelFileDescriptor.MODE_READ_ONLY);
+            document = new PdfDocument(pfd);
         }
 
-        if (pfd != null) {
-            renderer = new PdfRenderer(pfd);
-            pageCount = renderer.getPageCount();
-
-            if (pageCount > 0) {
-                PdfRenderer.Page p0 = renderer.openPage(0);
-                pageAspectRatio = (float) p0.getHeight() / (float) p0.getWidth();
-                p0.close();
-            }
+        pageCount = document.getPageCount();
+        if (pageCount > 0) {
+            pageAspectRatio = document.getPageAspectRatio(0);
         }
     }
 
@@ -111,7 +116,7 @@ public class PdfManager {
     }
 
     public synchronized Bitmap getPageSync(int index, int targetW, int targetH) {
-        if (index < 0 || index >= pageCount || renderer == null) return null;
+        if (index < 0 || index >= pageCount || document == null) return null;
 
         Bitmap cached = memoryCache.get(index);
         if (cached != null && !cached.isRecycled()) {
@@ -119,21 +124,12 @@ public class PdfManager {
         }
 
         try {
-            PdfRenderer.Page page = renderer.openPage(index);
+            // Render sharp comic page preserving aspect ratio
+            Bitmap pageBmp = document.renderPage(index, targetW, targetH);
+            if (pageBmp == null) return null;
 
-            // Compute exact fitted size preserving original aspect ratio (NO vertical stretching!)
-            float pageW = page.getWidth();
-            float pageH = page.getHeight();
-            float scale = Math.min((float) targetW / pageW, (float) targetH / pageH);
-            int drawW = Math.max(10, Math.round(pageW * scale));
-            int drawH = Math.max(10, Math.round(pageH * scale));
-
-            // Render PDF page into high-res intermediate bitmap
-            Bitmap pageBmp = Bitmap.createBitmap(drawW, drawH, Bitmap.Config.ARGB_8888);
-            Canvas pageCanvas = new Canvas(pageBmp);
-            pageCanvas.drawColor(Color.WHITE);
-            page.render(pageBmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
-            page.close();
+            int drawW = pageBmp.getWidth();
+            int drawH = pageBmp.getHeight();
 
             // Create full-screen bitmap for authentic edge-to-edge reading
             Bitmap fullBmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888);
@@ -360,13 +356,9 @@ public class PdfManager {
         if (memoryCache != null) {
             memoryCache.evictAll();
         }
-        if (renderer != null) {
-            try { renderer.close(); } catch (Exception ignored) {}
-            renderer = null;
-        }
-        if (pfd != null) {
-            try { pfd.close(); } catch (Exception ignored) {}
-            pfd = null;
+        if (document != null) {
+            document.close();
+            document = null;
         }
     }
 }
